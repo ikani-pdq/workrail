@@ -22,38 +22,56 @@ security defaults that may differ from upstream.
 ## Install
 
 WorkRail is published to GitHub Packages, not the public npm registry. You
-need to configure npm to find the `@pdq` scope on the right registry before
-installing.
+need a `.npmrc` that points the `@pdq` scope at GitHub Packages and
+authenticates as you. **You do not need to clone this repository to install
+WorkRail.**
 
-1. Copy `.npmrc.example` to `~/.npmrc` (or to a project-local `./.npmrc`):
+### 1. Get a GitHub Personal Access Token
 
-   ```
-   cp .npmrc.example ~/.npmrc
-   ```
+Create a classic PAT at https://github.com/settings/tokens/new with the
+`read:packages` scope checked. If your account is in a SAML SSO org, also
+click "Configure SSO" on the new token and authorize it for the PDQ org
+that hosts `@pdq/workrail`. Without that authorization the token works for
+everything else but cannot read PDQ-private packages.
 
-2. Open it and replace `TOKEN` with your GitHub PAT. The file should look
-   like:
+### 2. Configure `~/.npmrc`
 
-   ```
-   @pdq:registry=https://npm.pkg.github.com
-   //npm.pkg.github.com/:_authToken=ghp_xxxxxxxxxxxxxxxx
-   ```
+Open `~/.npmrc` in your editor (create the file if it does not exist) and
+add these two lines, replacing `YOUR_PAT_HERE` with the token from step 1:
 
-3. Install globally:
+```
+@pdq:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=YOUR_PAT_HERE
+```
 
-   ```
-   npm install -g @pdq/workrail
-   ```
+If you prefer to scope the auth to a single project, create `./.npmrc` in
+that project's root instead. The content is identical.
 
-4. Verify:
+Do not commit any `.npmrc` that contains a real token. Add it to your
+global gitignore if you keep it project-local.
 
-   ```
-   workrail --version
-   ```
+### 3. Install
 
-   This should print the published package version. If npm reports `403
-   Forbidden`, your PAT is missing the `read:packages` scope or has not been
-   authorized for the PDQ org via SSO.
+```
+npm install -g @pdq/workrail
+```
+
+### 4. Verify
+
+```
+workrail --version
+```
+
+This prints the published package version when everything is wired up
+correctly. If you see one of these errors:
+
+- **`404 Not Found`** -- the `@pdq` scope is not yet hosted on a PDQ-owned
+  GitHub org (a rollout prerequisite tracked in #8). The package has not
+  been published anywhere you can reach yet.
+- **`403 Forbidden`** -- your PAT is missing the `read:packages` scope, or
+  the token has not been SSO-authorized for the PDQ org.
+- **`E401 Unauthorized`** -- the token is wrong or expired. Regenerate it
+  and update `~/.npmrc`.
 
 ## Wire up your MCP client
 
