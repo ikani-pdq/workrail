@@ -2,6 +2,14 @@
 
 This guide covers setting up WorkRail with Claude Code (both Desktop and CLI).
 
+**Prerequisite:** install WorkRail locally first, per the [main README's
+Install section](../../README.md#install) (`git clone` -> `npm run build` ->
+`npm pack` -> `npm install -g` the tarball). Do not use `npx
+@ikani.samani/workrail` -- the public npm registry is not a trusted install
+source for this fork, and `npx` would silently fetch whatever `latest`
+currently resolves to. Every config below assumes the `workrail` binary is
+already on your `PATH` from that local install.
+
 ## Quick Start
 
 ### Claude Desktop App
@@ -13,8 +21,7 @@ This guide covers setting up WorkRail with Claude Code (both Desktop and CLI).
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@ikani.samani/workrail"]
+      "command": "workrail"
     }
   }
 }
@@ -31,8 +38,8 @@ This guide covers setting up WorkRail with Claude Code (both Desktop and CLI).
 # Navigate to your project
 cd /path/to/your/project
 
-# Add WorkRail MCP server
-claude mcp add workrail npx -y @ikani.samani/workrail
+# Add WorkRail MCP server (points at the locally installed binary)
+claude mcp add workrail workrail
 ```
 
 This creates/updates `.claude.json` in your project root.
@@ -48,8 +55,7 @@ Edit or create `.claude.json` in your project root:
       "mcpServers": {
         "workrail": {
           "type": "stdio",
-          "command": "npx",
-          "args": ["-y", "@ikani.samani/workrail"],
+          "command": "workrail",
           "env": {}
         }
       }
@@ -73,8 +79,7 @@ To use custom workflows, add environment variables:
       "mcpServers": {
         "workrail": {
           "type": "stdio",
-          "command": "npx",
-          "args": ["-y", "@ikani.samani/workrail"],
+          "command": "workrail",
           "env": {
             "WORKFLOW_STORAGE_PATH": "/path/to/custom/workflows",
             "WORKFLOW_GIT_REPOS": "https://github.com/your-org/workflows.git",
@@ -199,7 +204,7 @@ Please use the workrail-executor agent to run the wr.bug-investigation workflow
 
 ```bash
 # Check what WorkRail sees
-npx @ikani.samani/workrail list
+workrail list
 
 # Verify custom paths
 ls -la ~/.workrail/workflows/

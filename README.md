@@ -2,14 +2,12 @@
 
 This is a personal hardened fork of [WorkRail](https://github.com/EtienneBBeaulac/workrail),
 a step-by-step workflow enforcement engine for AI agents delivered as an MCP
-server. It is published publicly as `@ikani.samani/workrail` on the npm registry.
+server. The package also publishes to the npm registry as
+`@ikani.samani/workrail`, but the registry is not a trusted install source --
+build and install locally instead (see [Install](#install) below).
 
 If you want the upstream public version, install `@exaudeus/workrail` from
 npmjs.org instead.
-
-> **Note:** npm usernames cannot contain dots. If the registered scope ends
-> up being `@ikani-samani` rather than `@ikani.samani`, swap the package name
-> accordingly in the steps below.
 
 ## Prerequisites
 
@@ -20,12 +18,26 @@ npmjs.org instead.
 
 ## Install
 
+Install from a local build rather than the npm registry. This guarantees you
+run exactly the code in this repo, with no dependency on what `latest`
+happens to resolve to on npmjs.com.
+
 ```
-npm install -g @ikani.samani/workrail
+git clone https://github.com/ikani-pdq/workrail.git
+cd workrail
+npm install
+npm run build
+npm pack
+npm install -g ./ikani.samani-workrail-*.tgz
 ```
 
-No `.npmrc` configuration or authentication token is needed. The package is
-published publicly on the npm registry.
+`npm pack` writes a tarball named `<scope>-<name>-<version>.tgz` (dots in the
+scope become dashes), e.g. `ikani.samani-workrail-3.101.1.tgz` — run `ls
+*.tgz` if the glob above doesn't match. No `.npmrc` configuration,
+authentication token, or registry access is needed.
+
+To upgrade later: `git pull`, rebuild, `npm pack` again, and reinstall the
+new tarball the same way.
 
 ## Verify
 
@@ -33,15 +45,19 @@ published publicly on the npm registry.
 workrail --version
 ```
 
-This prints the published package version. If you see a `404 Not Found`,
-the package has not been published yet (a publish-time prerequisite is
-still outstanding).
+This prints the version from the tarball you built and installed. If the
+command is not found, confirm the global npm bin directory (`npm bin -g`) is
+on your `PATH`.
 
 ## Wire up your MCP client
 
 WorkRail is an MCP server. You point your client (Claude Code, Claude
 Desktop, Cursor, Firebender, etc.) at it. Pick the section that matches your
 client.
+
+Since the [Install](#install) step above installs `workrail` globally from
+your local build, every client just needs to reference the binary directly
+-- no `npx`, and no registry fetch at runtime.
 
 ### Claude Code CLI
 
@@ -51,8 +67,7 @@ Add the server to `~/.claude.json` (or a project-local `.mcp.json`):
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@ikani.samani/workrail"]
+      "command": "workrail"
     }
   }
 }
@@ -69,8 +84,7 @@ docs):
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@ikani.samani/workrail"]
+      "command": "workrail"
     }
   }
 }
@@ -79,23 +93,8 @@ docs):
 ### Cursor / other MCP clients
 
 WorkRail follows the standard stdio transport. Any client that supports an
-MCP server with a command and args should work with the same shape as above.
-See `docs/integrations/` for client-specific notes (Firebender, Docker, etc).
-
-### Local dev binary (alternative to `npx`)
-
-If you want a faster startup or do not want `npx` to fetch the package each
-time, install once globally and then reference the binary directly:
-
-```json
-{
-  "mcpServers": {
-    "workrail": {
-      "command": "workrail"
-    }
-  }
-}
-```
+MCP server with a command should work with the same shape as above. See
+`docs/integrations/` for client-specific notes (Firebender, Docker, etc).
 
 ## First run
 
