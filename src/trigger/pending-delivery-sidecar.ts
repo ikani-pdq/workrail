@@ -68,7 +68,9 @@ export async function writePendingDeliverySidecar(
 ): Promise<void> {
   const sidecarPath = path.join(sessionsDir, `pending-delivery-${sidecar.daemonSessionId}.json`);
   const tmpPath = `${sidecarPath}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(sidecar, null, 2), 'utf8');
+  // Sidecar embeds a live credential (e.g. GitHubDraftReviewPollState.token) -- owner-only
+  // mode, matching the 0o600 convention in src/v2/infra/local/fs/index.ts.
+  await fs.writeFile(tmpPath, JSON.stringify(sidecar, null, 2), { encoding: 'utf8', mode: 0o600 });
   await fs.rename(tmpPath, sidecarPath);
 }
 
