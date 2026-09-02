@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 
 import { executeStartWorkflow } from '../../../src/mcp/handlers/v2-execution/start.js';
-import { signEAT } from '../../../src/v2/durable-core/tokens/index.js';
+import { signEAT, verifyEAT } from '../../../src/v2/durable-core/tokens/index.js';
 import { parseContinueTokenOrFail } from '../../../src/mcp/handlers/v2-token-ops.js';
 import { NullGitSnapshotV2 } from '../../../src/v2/ports/git-snapshot.port.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
@@ -351,6 +351,13 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
       const refreshedEat = JSON.parse(refreshedContext.eat_token);
       expect(refreshedEat.payload.harness).toBe('claude_code');
       expect(refreshedEat.payload.activeModel).toBe('claude-3-5-sonnet');
+
+      // Regression guard: the refreshed token's signature must be a real base64url string
+      // (not the signEAT Result object itself) and must verify successfully.
+      expect(typeof refreshedEat.signature).toBe('string');
+      expect(
+        verifyEAT(refreshedEat.payload, refreshedEat.signature, ctx.v2.tokenCodecPorts, String(sessionId))
+      ).toBe(true);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

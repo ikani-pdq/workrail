@@ -268,8 +268,8 @@ export function handleAdvanceIntent(args: {
                 sessionId: String(sessionId),
               };
               const newSignature = signEAT(newEatPayload, tokenCodecPorts);
-              if (newSignature) {
-                const newEatToken = JSON.stringify({ payload: newEatPayload, signature: newSignature });
+              if (newSignature.ok) {
+                const newEatToken = JSON.stringify({ payload: newEatPayload, signature: newSignature.value });
                 const runContextObj = indexToUse.runContextByRunId.get(String(runId));
                 const existingContext = runContextObj ?? {};
                 const contextEventId = idFactory.mintEventId();
@@ -319,6 +319,8 @@ export function handleAdvanceIntent(args: {
                     indexToUse = buildSessionIndex(afterRefreshSorted.value);
                     return okAsync<void, ContinueWorkflowError>(undefined);
                   });
+              } else {
+                console.warn(`[workrail:eat] Failed to sign refreshed EAT (session ${String(sessionId)}): ${newSignature.error.reason}. Continuing without refreshing eat_token.`);
               }
             }
 
