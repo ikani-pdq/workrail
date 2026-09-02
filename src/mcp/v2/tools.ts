@@ -43,6 +43,7 @@ export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to start'),
   workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
   goal: z.string().min(1).describe('A short sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation", "review PR #47 before merge", "investigate why the build fails on CI").'),
+  modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional().describe('Recommended model tier/category for executing this workflow (lightweight, mid, or heavy).'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
@@ -93,6 +94,14 @@ const continueWorkflowContextAliasField = z.record(z.unknown()).optional().descr
   'Compatibility alias for context. Canonical field name: "context".'
 );
 
+const continueWorkflowNotesAliasField = z.string().optional().describe(
+  'Compatibility alias for output.notesMarkdown. Provide your step notes here directly.'
+);
+
+const continueWorkflowArtifactsAliasField = z.array(z.unknown()).optional().describe(
+  'Compatibility alias for output.artifacts. Provide structured step artifacts here directly.'
+);
+
 /**
  * Validation schema for continue_workflow (runtime contract).
  *
@@ -105,6 +114,8 @@ const continueWorkflowContextAliasField = z.record(z.unknown()).optional().descr
 export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
   .extend({
     contextVariables: continueWorkflowContextAliasField,
+    notes: continueWorkflowNotesAliasField,
+    artifacts: continueWorkflowArtifactsAliasField,
   })
   .superRefine((data, ctx) => {
     const aliasMap = CONTINUE_WORKFLOW_PROTOCOL.aliasMap;
@@ -118,7 +129,21 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
         message: `Provide either "${canonical}" or "${alias}", not both. Canonical field: "${canonical}".`,
       });
     }
-    if (data.intent === 'rehydrate' && data.output) {
+    if (data.notes !== undefined && data.output?.notesMarkdown !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['notes'],
+        message: 'Provide either "notes" or "output.notesMarkdown", not both.',
+      });
+    }
+    if (data.artifacts !== undefined && data.output?.artifacts !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['artifacts'],
+        message: 'Provide either "artifacts" or "output.artifacts", not both.',
+      });
+    }
+    if (data.intent === 'rehydrate' && (data.output || data.notes !== undefined || data.artifacts !== undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['output'],
@@ -135,17 +160,43 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
           'workspacePath is required for rehydration. Shared WorkRail servers cannot safely infer your current workspace, so pass the absolute "Workspace:" path from your system parameters.',
       });
     }
+    const contextObj = data.context ?? data.contextVariables;
+    if (contextObj && typeof contextObj === 'object') {
+      const reservedKeys = ['eat_token', 'parent_eat_token', 'metrics_harness', 'metrics_active_model'];
+      for (const k of reservedKeys) {
+        if (k in contextObj) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [data.context !== undefined ? 'context' : 'contextVariables', k],
+            message: `Reserved system key "${k}" cannot be set in context.`,
+          });
+        }
+      }
+    }
   })
   .transform((data) => {
     const normalized = CONTINUE_WORKFLOW_PROTOCOL.aliasMap
       ? normalizeAliasedFields(data as Readonly<Record<string, unknown>>, CONTINUE_WORKFLOW_PROTOCOL.aliasMap)
       : (data as Record<string, unknown>);
-    const intent = data.intent ?? (data.output ? 'advance' : 'rehydrate');
+    const notesMarkdown = data.notes ?? data.output?.notesMarkdown;
+    const artifacts = data.artifacts ?? data.output?.artifacts;
+    const output = (notesMarkdown !== undefined || artifacts !== undefined) ? {
+      ...(notesMarkdown !== undefined ? { notesMarkdown } : {}),
+      ...(artifacts !== undefined ? { artifacts } : {}),
+    } : undefined;
+    const intent = data.intent ?? (output ? 'advance' : 'rehydrate');
+    const cleanContext = normalized.context ? { ...(normalized.context as Record<string, unknown>) } : undefined;
+    if (cleanContext) {
+      delete cleanContext['eat_token'];
+      delete cleanContext['parent_eat_token'];
+      delete cleanContext['metrics_harness'];
+      delete cleanContext['metrics_active_model'];
+    }
     return {
       intent,
       continueToken: data.continueToken,
-      ...(normalized.context ? { context: normalized.context } : {}),
-      ...(data.output ? { output: data.output } : {}),
+      ...(cleanContext ? { context: cleanContext } : {}),
+      ...(output ? { output } : {}),
       ...(data.workspacePath !== undefined ? { workspacePath: data.workspacePath } : {}),
     };
   });

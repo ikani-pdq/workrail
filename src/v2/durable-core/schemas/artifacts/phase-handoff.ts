@@ -174,22 +174,39 @@ export function parseCodingHandoffArtifact(
 }
 
 /** Actionable blocked message for wr.shaping_handoff contract. */
-export function getShapingHandoffBlockedMessage(): readonly string[] {
+export function getShapingHandoffBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
+  const exampleShaping = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.shaping_handoff", "version": 1, "pitchPath": "/path/to/pitch.md", "selectedShape": "...", "appetite": "Small batch (1-2 days)", "keyConstraints": [], "rabbitHoles": [], "outOfScope": [], "validationChecklist": [] }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.shaping_handoff", "version": 1, "pitchPath": "/path/to/pitch.md", "selectedShape": "...", "appetite": "Small batch (1-2 days)", "keyConstraints": [], "rabbitHoles": [], "outOfScope": [], "validationChecklist": [] }] } }`;
   return [
     `Artifact contract: ${SHAPING_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.shaping_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: pitchTitle (string), pitchPath (string), selectedApproach (string).`,
-    `See the step prompt for the full schema.`,
+    `Provide a wr.shaping_handoff artifact in ${paramPath}.`,
+    `Required fields: version (number, must be 1), pitchPath (string), selectedShape (string), appetite (string), keyConstraints (string[]), rabbitHoles (string[]), outOfScope (string[]), validationChecklist (string[]).`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    exampleShaping,
+    `\`\`\``,
   ];
 }
 
 /** Actionable blocked message for wr.coding_handoff contract. */
-export function getCodingHandoffBlockedMessage(): readonly string[] {
+export function getCodingHandoffBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
+  const exampleCoding = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.coding_handoff", "version": 1, "keyDecisions": ["..."], "knownLimitations": [], "testsAdded": [], "filesChanged": ["path/to/file.ts"] }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.coding_handoff", "version": 1, "keyDecisions": ["..."], "knownLimitations": [], "testsAdded": [], "filesChanged": ["path/to/file.ts"] }] } }`;
   return [
     `Artifact contract: ${CODING_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.coding_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: branchName (string), keyDecisions (string[]), knownLimitations (string[]), testsAdded (string[]), filesChanged (string[]).`,
-    `See the step prompt for the full schema.`,
+    `Provide a wr.coding_handoff artifact in ${paramPath}.`,
+    `Required fields: version (number, must be 1), keyDecisions (string[]), knownLimitations (string[]), testsAdded (string[]), filesChanged (string[]).`,
+    `Optional fields: branchName (string), correctedAssumptions (array of {assumed, actual}).`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    exampleCoding,
+    `\`\`\``,
   ];
 }
 

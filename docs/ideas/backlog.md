@@ -64,6 +64,114 @@ No proposed solutions here -- just the problem.]
 
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
+### Engine hint content fixes: correct misleading guidance on artifact validation failures (May 20, 2026)
+
+**Status: done** | Shipped PR #1079 (v3.101.2, May 20, 2026)
+
+**Score: 14** | Cor:3 Cap:2 Eff:3 Lev:3 Con:3 | Blocked: no
+
+When an agent fails to submit a required artifact, the engine's blocked response actively misdirects it: (1) the `suggestedFix` says "fix `notesMarkdown`" for all non-assessment artifact contracts -- wrong, the agent should fix `output.artifacts`; (2) the circuit-breaker after 3 retries hardcodes "submit a valid `wr.assessment` artifact" regardless of what the step actually requires; (3) wrong-kind artifacts (e.g. agent submits `wr.assessment` when `wr.loop_control` is needed) are silently dropped with no feedback; (4) the empty-artifacts case produces the same unhelpful message as the wrong-kind case. The result: the agent receives contradictory signals from the step prompt and the blocked message, spirals, and terminates. This is the confirmed root cause of the 0/13 `wr.mr-review` success rate. Every artifact schema file already has a `getBlockedMessage()` function with a canonical example -- the fix is to wire the engine to use it.
+
+**Discovery complete (May 20, 2026):** Design doc at `docs/plans/cortex-hint-content-design.md`. 4 targeted changes: extract `blocked-messages` registry to `src/v2/durable-core/schemas/artifacts/blocked-messages.ts`, wire `reason-model.ts` `reasonToBlocker()` to dispatch through it, fix `advance.ts:137` to use actual `contractRef`, add wrong-kind + empty-artifacts detection in `artifact-contract-validator.ts`. Ships independently, benefits all entry points (MCP + daemon). Must ship before SessionCortex Phase 1+2 -- the cortex hint content draws from the same registry.
+
+**Implementation prerequisites:**
+- Verify `pointer.contractRef` is populated on all `MISSING_REQUIRED_OUTPUT` blocking paths before wiring registry dispatch
+- Add `wr.contracts.assessment` to the registry (currently handled inline in `reason-model.ts` only)
+- Handle empty `output.artifacts` case explicitly -- this is the most common failure mode
+
+**GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/1074
+
+---
+
+### Daemon session harness: intelligent layer between agent loop and engine (May 20, 2026)
+
+**Status: partial** | Priority: critical
+
+**Score: 15** | Cor:3 Cap:3 Eff:1 Lev:3 Con:3 | Blocked: no
+
+The daemon's agent loop is currently a thin wrapper: start the LLM, execute its tool calls, check for stuck/stall, repeat. There is no layer that understands what the session is trying to accomplish, can intervene when things go wrong, or can do anything other than watch the agent loop until an external heuristic fires. This means sessions get stuck, spiral, hallucinate recovery paths, and terminate unexpectedly -- all of which are unacceptable outcomes when WorkTrain is supposed to be running autonomously overnight. The worst possible outcome (a stuck session with no recovery path) happens regularly today and has no principled fix.
+
+The daemon owns the agent loop completely. Unlike the MCP server -- which is a stateless tool interface that cannot reach into the agent -- the daemon controls the LLM calls, intercepts tool calls, owns the message history, and can inject content at any point. This is the fundamental capability that makes a harness possible and that the current architecture does not exploit.
+
+A session harness is a layer that sits between the agent loop and the engine and owns session lifecycle intelligence: pre-turn state injection (nudge the agent when a pending outputContract hasn't been satisfied), tool interception (enrich raw engine errors with step-specific recovery guidance before the agent sees them), failure pattern escalation (detect spirals and switch recovery strategy rather than letting stuck detectors be the only backstop), session suspension (true pause at any point -- waiting for MR review, operator input, a dependent session, a timer), daemon-side tool execution (read files, call APIs, check PR status and inject results as synthetic messages without going through the agent), and active steering (inject corrections when the agent goes off-track before things go further wrong). With a proper harness, "stuck" is never a terminal state -- there is always another recovery level before operator escalation, and operator escalation itself is a handled path, not an abnormal exit.
+
+**Constraint: no AI in the harness.** All harness logic must be deterministic scripts -- state checks, counters, lookups, pattern matching. AI-based steering or recovery is explicitly out of scope.
+
+**Discovery complete (May 20, 2026):** Design doc at `docs/plans/session-harness-design.md`. Selected direction: `SessionCortex` -- a stateful class subscribing to the existing `turn_end` event, maintaining per-step failure counts in a typed append-only crash-safe event log, driving a typed escalation state machine: `NoFailures -> HintInjected -> ScaffoldInjected -> StepRewound -> OperatorEscalated`. Individual behaviors are pure functions. Rejected two-chain interceptor approach (hot-path mutation, no shared memory, open/closed fails). Key insight: `SessionState` is not persisted to disk -- cortex event log is the minimum persistence surface for suspension/resumption.
+
+**Implementation phases:**
+- **Phase 0 (ready to implement -- engine fixes):** Fix the engine's wrong guidance content before building the cortex. Design doc at `docs/plans/cortex-hint-content-design.md`. 4 targeted changes: extract blocked-messages registry, wire `reason-model.ts` to use it, fix `advance.ts:137` circuit-breaker, add wrong-kind + empty-artifacts detection. Ships independently, benefits all entry points. See backlog item "Engine hint content fixes" below.
+- **Phase 1+2 (shaped, ready for coding-task):** Cortex wiring + failure counting + hint injection + scaffold injection. Pitch at `docs/plans/session-cortex-phase1-2-pitch.md`. The cortex hint content draws from the same `getBlockedMessage()` registry as Phase 0 -- no hand-authored static strings needed.
+- **Phase 3 (needs design):** Step rewind -- HMAC token protocol rewind mechanism not yet designed.
+- **Phase 4 (needs design):** Operator escalation -- notification mechanism and timeout not specified.
+- **Phase 5+ (future):** Daemon-side synthetic tool calls, context degradation checkpointing, session segmentation. Dynamic tool description per step (C3 from hint content discovery) belongs here if Phase 0+1+2 don't fully resolve daemon session failures.
+
+**Open prerequisites before Phase 3/4:**
+- Step rewind mechanism for HMAC token / append-only log protocol
+- Operator escalation timeout and notification/response interface
+
+**Shipped:** Phase 0 (PR #1079, v3.101.2) -- engine hint fixes. Phase 1+2 (PR #1081/#1084, v3.102.0) -- SessionCortex hint+scaffold injection, crash recovery, typed StepCortexState union.
+
+**Remaining open:** Phase 3 (step rewind -- HMAC protocol rewind not yet designed), Phase 4 (operator escalation -- notification mechanism not specified). Phase 5+ (synthetic tool calls, context checkpointing) -- future.
+
+**GitHub issues:** Phase 0 (engine fixes): #1074 (closed) | Phase 1+2 (cortex): #1075 (closed)
+
+---
+
+### wr.mr-review spawns full workflow children -- blocking review MVP (May 21, 2026)
+
+**Status: partial** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+**Shipped (PR #1084):** Reviewer families now spawn `wr.routine-reviewer-family` (1-step bounded routine) instead of full `wr.mr-review` instances. This is explicitly a **temporary shim** -- see the routine's description for the permanent fix direction. The proper architecture is `spawn_agent` task worker mode (no workflowId, typed context contract, terminates on end_turn).
+
+**What remains wrong:** The routine is a 1-step workflow container, not a true bounded task worker. The parent still blocks inside `spawn_agent.execute()` waiting for children. Context passed to children is free-form `Record<string, unknown>` -- no compile-time enforcement. The `spawn_agent task worker mode` backlog item captures the proper fix.
+
+**Related:** `spawn_agent task worker mode` (backlog item below) is the architectural fix. `Coordinator-intercepted delegation` is the longer-term direction.
+
+---
+
+### C2 callback bug: parent stall timer not reset by child LLM activity (May 21, 2026)
+
+**Status: done** | Shipped PR #1054 (May 19, 2026)
+
+Fixed in `src/daemon/runner/agent-loop-runner.ts` -- `notifyParentActivity` now fires in `onLlmTurnStarted` and `onToolCallStarted`, not just `onAdvance`. The fix was diagnosed and shipped two days before this backlog item was written.
+
+---
+
+### Coordinator-intercepted delegation: workflow-declared parallel tasks owned by coordinator, not agent (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:3 Eff:1 Lev:3 Con:1 | Blocked: no
+
+**Needs full exploration before any implementation.** The design direction is promising but has open questions that require a `wr.discovery` session before coding begins.
+
+**The problem:** `spawn_agent` as a tool called from within the agent loop puts too much responsibility on the agent: it decides to delegate, constructs child tasks, blocks waiting for children, and synthesizes results -- all while burning turns and stall timer budget. The parent's stall timer has no awareness that the agent is legitimately waiting for children. When a review workflow spawns 3 parallel reviewer families, the parent dies waiting because C2 doesn't fire fast enough.
+
+**The direction:** The coordinator intercepts structured delegation instead of the agent executing it. A workflow step emits a `wr.coordinator_signal` artifact with `signalKind: delegation_needed` and a task list. The coordinator sees it, spawns bounded task agents autonomously (not workflow sessions -- just goal + tools + return last message), waits for them deterministically outside any agent loop, assembles results, and steers them back into the parent session via `agent.steer()`. The parent's stall timer is irrelevant because the parent's agent loop is **parked** (not running) during delegation.
+
+**Why this is architecturally better than the current model:**
+- Parent stall timer never fires during child execution -- parent isn't running
+- Children are bounded task workers, not full workflow instances
+- Coordinator owns delegation logic deterministically (no LLM routing)
+- Results are assembled and injected cleanly before the parent resumes
+
+**What the workflow declares:** A step can include a `delegationSpec` (needs design) describing what tasks to parallelize, what context to pass each, and how to assemble results. The coordinator reads this at step advance time and decides whether to handle delegation or pass through to the normal advance path.
+
+**Open questions (need discovery before implementation):**
+- Does `wr.coordinator_signal` need a new variant, or does the existing `delegation_needed` signalKind suffice?
+- Should delegation be declared in the workflow JSON (compile-time) or emitted by the agent (runtime)? Compile-time is more predictable; runtime is more flexible.
+- How does the coordinator know which bounded task type to use for each delegation? Does the workflow specify this?
+- What is the interface for a "bounded task agent"? Just goal + tools + end_turn with findings in the last message? Or something more structured?
+- How does this interact with `spawn_agent` as an agent-initiated tool? Both probably have their place -- bounded parallel reviewer families via coordinator vs. dynamic agent-initiated delegation for less structured cases.
+- Is `wr.mr-review` the only workflow that needs this, or does `wr.coding-task` parallel slice execution also benefit?
+
+**MVP path (before coordinator interception):** Fix `wr.mr-review` to use bounded routines or sequential reviewer passes (see above). Coordinator interception is the right long-term architecture but not required to unblock MVP review.
+
+---
+
 ### wr.coding-task forEach loop exposes broken agent-facing state (Apr 30, 2026)
 
 **Status: done** | Shipped May 1, 2026 (PR #926)
@@ -195,24 +303,69 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Dedicated Philosophy Compliance Gate Routine in `wr.coding-task` (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Implementing agents suffer from severe "focus-split" during active coding sessions (handling typescript compilations, terminal test errors, and multi-file logic), causing them to overlook high-level coding philosophies (immutability, exact ESM imports, avoiding parallel mutable states, type safety over primitives). Currently, there is no step in the `wr.coding-task` workflow that forces a late-stage cognitive audit checking for repository-level principles before handoff. This leads to codebases slowly decaying into localized patches despite system-wide instructions.
+
+**Things to hash out:**
+- How should the `routine-philosophy-audit` be modeled? It should likely run as a separate read-only session with a dedicated, isolated subagent that only receives the git diff and the repository principles.
+- What should the `wr.contracts.philosophy_compliance` artifact structure look like? A simple JSON schema mapping modified files to the specific principles applied or trade-offs made.
+- At what point should this gate fire? In Phase 7 (Final Verification) after the build and tests pass but before the handoff PR is created.
+
+---
+
+### Autonomous Session Context Pruning in WorkTrain Daemon (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+As long-running autonomous sessions proceed slice-by-slice, their context window gets bloated with thousands of lines of terminal outputs, compiler dumps, and raw file reads. This "attention decay" causes the agent to lose track of high-level system rules and repository philosophies in the noise of the active session, leading to compile-first-design-last shortcuts. Because MCP servers are stateless, the engine cannot prune context. However, the WorkTrain daemon manages the active LLM context and conversation payload directly.
+
+**Things to hash out:**
+- Should the daemon support a `pruneContext` directive at step boundaries in the workflow definition?
+- How do we preserve essential session history (such as the initial task description, the implementation plan, and high-level decisions) while purging intermediate tool outputs and prior compilation failures?
+- Does context pruning affect the agent's ability to maintain cross-turn consistency, and if so, how can we summarize the pruned turns to mitigate it?
+
+---
+
+### Git rebase workflow for agents (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Agents asked to rebase a branch routinely make the same mistakes: they skip conflict markers, accept one side wholesale without reading both, fail to verify the result builds and tests pass, and don't check whether changes from both sides are still semantically correct together after the merge. A rebase done wrong can silently lose logic from either side or create code that compiles but no longer works as intended. Without a structured workflow enforcing a deliberate step-by-step process, agents treat rebase as a mechanical operation rather than a reasoning task.
+
+**Things to hash out:**
+- What are the required checkpoint steps? At minimum: read both sides of each conflict before resolving, verify the intended behavior from each side is preserved in the resolution, run build+tests after each file resolved, final diff review before push.
+- Should the workflow handle interactive rebase (reordering/squashing commits) or only conflict resolution, or both?
+- How does the workflow detect when a "conflict-free" rebase silently loses semantic correctness (e.g. a function is moved on one branch and modified on the other, no textual conflict but wrong behavior)?
+
+---
+
 ### Pluggable output delivery: workflows produce structured artifacts, delivery is configured externally (May 19, 2026)
 
-**Status: partial** | Phases 1-7 shipped (PRs #1054, #1055, #1062-#1063, #1065, #1067, May 20 2026), needs verification + Phase 8 gaps remain
+**Status: partial** | Phases 1-7 shipped (PRs #1054, #1055, #1062-#1063, #1065, #1067, May 20 2026); delivery adapter architecture refactored (PR #1072 open); needs verification + Phase 8 gaps remain
 
 **Score: 12** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
 
-**What shipped (all phases complete):**
-- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit'|'synthesized'), `CliInboxAdapter`, `GitCommitDeliveryContext` interface
-- `synthesizeDeliveryConfig()` migration shim; `_runDeliveryByKind()` unified delivery dispatch
+**What shipped (Phases 1-7 + architecture refactor):**
+- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit'|'synthesized'), `CliInboxAdapter`
+- `synthesizeDeliveryConfig()` migration shim; `_runDeliveryByKind()` unified delivery dispatch (exhaustive switch, `assertNever`)
 - `delivery: { kind: github_draft_review, token: $TOKEN, login: user }` YAML block replacing legacy `reviewerIdentity`
 - Inline review comments posted to PR diff for findings with `file`+`startLine` fields
-- Gate resume: `PendingDraftReviewPoller` calls `resumeFromGate()` fire-and-forget when operator submits review -- `human_approval` gate loop completes automatically
-- `PendingDeliverySidecar` self-contained format (token in state, no trigger index lookup on restart)
-- `TriggerRouterOptions` object replaces 14 positional constructor params
-- `reviewerIdentity` fully removed from `WorkflowTrigger`, `TriggerDefinition`, and YAML parser
-- `callbackUrl` delivery unified through `runCallbackUrlDelivery()` named action
-- `triggers.yml` migrated to `delivery:` block format
-- Full design doc at `docs/plans/output-delivery-design.md`
+- Gate resume: `PendingDraftReviewPoller` calls `resumeFromGate()` fire-and-forget when operator submits review
+- `PendingDeliverySidecar` discriminated union per `adapterId` (typed state, no unsafe casts in recovery)
+- `PendingDeliverySidecar` types extracted to `pending-delivery-sidecar.ts`
+- `GitHubDraftReviewAdapter` and `GitCommitAdapter` as proper `implements DeliveryAdapter<K>` classes (PR #1072 open)
+- `GateResumeCallback` named type, injected at construction, threaded into `recoverPendingDeliveryPollers` so gate sessions resume after daemon restart
+- `reviewerIdentity` fully removed; `callbackUrl` unified; `triggers.yml` migrated
+- Full design doc at `docs/plans/output-delivery-design.md`; architecture refactor design at `docs/plans/output-delivery-design.md`
 
 **Needs verification before declaring fully production-ready:**
 - End-to-end test: fire a real `wr.mr-review` session with `delivery: { kind: github_draft_review }` in triggers.yml (no reviewerIdentity) and confirm draft review posts, inline comments appear, and gate resumes when operator submits
@@ -230,11 +383,91 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ---
 
-### Local LLM support: use Gemma, Llama, or any Ollama-compatible model as the agent backend (May 15, 2026)
+### spawn_agent task worker mode: workflowId-less bounded task spawning (May 21, 2026)
 
 **Status: idea** | Priority: high
 
 **Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+`spawn_agent` currently requires a `workflowId`, which forces all child sessions into a workflow container even when the child's job is simply "execute this bounded task and return findings." This is architecturally wrong: it makes illegal states representable (a reviewer family that re-runs the full parent workflow), it uses stringly-typed context (no compile-time enforcement that `reviewFactPacket` has the required fields), and it violates the principle that types must constrain not just label.
+
+The proper architecture is a `taskWorker` mode on `spawn_agent`: spawn a bare agent session with goal + tools + typed context contract, runs until `end_turn`, parent reads findings from the final assistant message. No workflow, no `complete_step`, no phases. The task worker terminates naturally when its work is done.
+
+**Current shim:** `wr.routine-reviewer-family` is a 1-step workflow that approximates this behavior. It is explicitly marked as a temporary shim in its description. It should be replaced when this item ships.
+
+**What the proper design requires:**
+- `spawn_agent` gains a `mode: 'task_worker'` field (or workflowId becomes optional)
+- A typed `taskContext` schema replaces the free-form `context: Record<string, unknown>` for task worker spawns
+- The engine validates `taskContext` against the declared schema at spawn time (validate at boundaries)
+- The parent reads the child's final message as the task result -- no artifacts, no outputContract
+- Cancellation propagates: if the parent is aborted, task worker children are also aborted
+
+**Prerequisite for:** coordinator-intercepted delegation (above), proper reviewer family implementation, any future bounded task delegation pattern.
+
+---
+
+### Per-role model configuration: different models for different session roles (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Child sessions spawned via `spawn_agent` currently inherit no model configuration from the parent trigger -- they fall through to the default Bedrock model (`us.anthropic.claude-sonnet-4-6`), which may differ from the parent's intended model. More broadly, different roles in a pipeline have genuinely different model requirements: a reviewer family doing targeted code analysis benefits from a capable model; a gate evaluator doing a simple verdict check could use a cheaper/faster model; a coordinator deciding routing needs deterministic behavior more than raw capability.
+
+There is no way today to say "use Haiku for sub-agents, Sonnet for the main agent" or "use Sonnet for review, Haiku for gate evaluation." All sessions in a pipeline use whichever model was configured on the trigger (for root sessions) or the default (for child sessions).
+
+**Things to hash out:**
+- Where does model config live for child sessions? Options: (a) spawn_agent spec includes a model field the spawner can set; (b) workflow author declares a `agentModel` at the step level for steps that spawn; (c) a workspace-level role mapping (`{ "reviewer": "haiku", "main": "sonnet", "gate_eval": "haiku" }`) that the daemon uses to resolve models by session role
+- Is this a trigger concern (configure per-trigger which model each spawned role uses) or a workflow concern (workflow declares model requirements per step)?
+- How does this interact with ProviderConfig DU (above) -- ideally they compose cleanly
+
+---
+
+### Migrate daemon subprocess handling to Bun (May 21, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:1 Lev:2 Con:2 | Blocked: no
+
+The daemon (`src/daemon/`) uses Node's `child_process.exec()` for all subprocess execution. Node's `exec()` types don't support the `stdio` option, requiring `as any` casts throughout. Bun's `Bun.spawn()` provides a cleaner lower-level API with native TypeScript types, direct stream access, and clean AbortSignal support -- no type casting hacks needed.
+
+Beyond correctness, Bun is faster at startup and file I/O, which matters for a daemon that creates worktrees, reads many files, and spawns many processes per session. Bun also has native TypeScript support, eliminating the `tsc` build step for the daemon.
+
+**Scope:** The daemon (`src/daemon/`) is the natural migration target first -- it's where subprocess handling matters most and is relatively self-contained. The MCP server, console, and CLI could remain on Node initially.
+
+**Things to hash out:**
+- Which npm packages used by the daemon have Bun compatibility gaps, if any?
+- Does vitest (the test runner) need changes to test Bun-native code?
+- Does the `npm run dev:daemon` dev loop change with Bun (no `tsc` needed)?
+- What's the right migration boundary -- daemon only, or full codebase?
+
+---
+
+### ProviderConfig: first-class LLM provider concept with interchangeable providers (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:2 Cap:3 Eff:1 Lev:3 Con:3 | Blocked: no
+
+WorkTrain has no first-class LLM provider concept. Credentials are threaded as a raw `apiKey: string` parameter through 9 call sites (trigger-listener -> TriggerRouter -> runWorkflow -> startup-recovery -> gate-resume -> buildAgentReadySession -> constructTools -> spawn-agent -> buildPreAgentSession -> buildAgentClient), but `buildAgentClient` is the ONLY consumer. All other sites are pure pass-through couriers. The immediate symptom -- daemon fails to start with `missing_api_key` when only Bedrock credentials are present -- was patched with a `hasBedrock` guard, but the underlying threading antipattern remains. Without a typed ProviderConfig concept, adding a new provider (Ollama, Vertex, OpenAI) requires changing if-branches in a single growing function rather than adding a new variant to a discriminated union.
+
+**The right architecture:** `ProviderConfig = { kind: 'anthropic'; apiKey: string } | { kind: 'bedrock' } | { kind: 'ollama'; baseUrl: string }` resolved once at the composition root (`startTriggerListener`). `buildAgentClient(providerConfig, trigger)` becomes the sole construction site with `Result<{agentClient, modelId}, ProviderError>` return type (no throw). The `apiKey: string | undefined` parameter is deleted from all 9 call sites. New providers plug in by adding a union variant -- exhaustiveness checking enforces that all switch sites handle the new case. This also provides a natural anchor for Bedrock credential expiry detection (backlog score 14).
+
+**Design doc:** `docs/plans/provider-config-design.md` (completed May 20, 2026). Selected direction is the ProviderConfig DU after `wr.discovery` session. Full rationale, rejected alternatives, and implementation constraints are documented there.
+
+**Upgrade trigger from current patch:** When Bedrock credential expiry detection (this backlog) is scoped, check if it needs a stateful refreshable credential handle. If yes, implement ProviderConfig DU at that time. If Ollama support is being built first, ProviderConfig DU is required as a prerequisite (Ollama needs a `baseUrl` that doesn't come from env).
+
+**Things to hash out:**
+- When `agentConfig.model` specifies a provider prefix (e.g. `anthropic/claude-opus`) but only Bedrock creds are present, should `buildAgentClient` fail fast with a clear error or fall back to Bedrock with the model stripped of its prefix?
+- Should ProviderConfig be resolved from `config.json` (operator-declared default) or purely from env detection? `config.json` gives better startup observability but adds schema complexity.
+
+---
+
+### Local LLM support: use Gemma, Llama, or any Ollama-compatible model as the agent backend (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: yes (needs ProviderConfig DU above)
 
 WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`) and Amazon Bedrock (`AWS_PROFILE`). Both are cloud APIs with per-token costs, rate limits, and latency. A local LLM backend would enable: offline operation, zero API cost for iteration and testing, privacy for sensitive codebases, and much faster iteration cycles on workflow development.
 
@@ -242,7 +475,7 @@ WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`
 
 **Implementation path:** `AgentClientInterface` in `agent-loop.ts` is already duck-typed -- it only requires `messages.create(params, options)` returning `Promise<Anthropic.Message>`. Ollama's `/api/chat` endpoint with `stream: false` can be wrapped in a thin adapter that maps to this interface. The key translation: Ollama uses OpenAI-style tool calling format, not Anthropic's `tool_use` content blocks -- the adapter needs to normalize this.
 
-**Where it fits:** `buildAgentClient()` in `src/daemon/core/agent-client.ts` parses `agentConfig.model` and constructs the right client. Adding an `ollama/` prefix case there is the natural extension point. No changes needed to AgentLoop, runWorkflow, or any workflow definitions.
+**Where it fits:** Requires ProviderConfig DU (item above) as a prerequisite -- Ollama needs a `baseUrl` that is not an env var, making it structurally incompatible with the current env-read-only approach in `buildAgentClient`. Once ProviderConfig DU ships, adding Ollama is one new union variant + one new class implementing `AgentClientInterface`.
 
 **Things to hash out:**
 - Ollama tool calling quality varies significantly by model -- Llama 3.2 and Gemma 3 support tool use but reliability is lower than Claude. How does WorkTrain handle an agent that frequently hallucinates tool names or ignores tool results?
@@ -273,26 +506,32 @@ Shipped as `worktrain session events <id>`. Reads the daemon event log (not conv
 
 **Score: 16** | Cor:3 Cap:3 Eff:3 Lev:3 Con:4 | Blocked: no
 
-We have never successfully completed a full end-to-end run of the reviewer-assigned MR review feature. Every attempt so far has stalled mid-session due to hung Bedrock calls before reaching the `human_approval` gate. We don't know if the gate routing works, if the draft review gets created, if the poller starts, or if the macOS notification fires. Until we see this work once, we're shipping untested infrastructure.
+We have never successfully completed a full end-to-end autonomous `wr.mr-review` run that reaches the gate, posts a draft review, and completes after the operator publishes it.
 
-**What needs to happen:**
-1. A `wr.mr-review` session runs on a real PR to completion (reaches phase-6 final handoff)
-2. The `human_approval` gate fires (not `coordinator_eval` -- verify this in session events)
-3. `maybeRunPostWorkflowActions()` reads `wr.review_verdict` from session artifacts
-4. `GitHubReviewApprovalAdapter.createDraftReview()` posts a PENDING draft to GitHub
-5. The operator sees "Finish your review" in GitHub with real findings
-6. Operator publishes the draft
-7. `PendingDraftReviewPoller` detects submission within 60s
-8. `review_draft_submitted` event appears in the session event log
-9. macOS notification fires at draft creation
+**Root causes cleared (May 2026):**
+- ~~Engine misdirects agents on artifact failures~~ -- fixed PR #1079 (blocked-messages registry, wrong-kind detection)
+- ~~`wr.mr-review` reviewer families spawn full child review sessions~~ -- fixed PR #1084 (bounded `wr.routine-reviewer-family` shim)
+- ~~Bedrock-only daemon startup fails~~ -- fixed PR #1084 (hasBedrock guard)
+- ~~rg/bash stdin hang~~ -- fixed PR #1054 (stdin closed)
+- ~~C2 parent stall timer not reset by child LLM activity~~ -- fixed PR #1054
+- ~~human_approval gate fires before draft is posted~~ -- not true, gate fires AFTER draft posts; gate removed as prerequisite to draft posting (PR #1081 conditional gate, fires only for non-clean verdicts)
 
-**Blockers cleared:**
-- ~~`worktrain session-log` command~~ -- **shipped** as `worktrain session events <id>` (PRs #1039, #1043)
-- ~~Per-call timeout in AgentLoop~~ -- **shipped** (PR #1030, May 2026)
+**What the gate now does (as of PR #1081/1084):**
+- `recommendation == 'clean'` → session completes autonomously, draft posts via delivery adapter, no gate
+- `recommendation != 'clean'` (minor/blocking) → gate fires, draft posts, session waits for operator to publish draft
 
-**Requirement:** Haiku MUST be able to complete a full review session and produce excellent findings. Switching to Sonnet is not an acceptable workaround -- if the pipeline cannot run on cheap models, that is a bug to fix, not a model to upgrade.
+**What still needs to happen:**
+1. `wr.mr-review` session runs to completion on a real PR (reaches phase-6)
+2. Draft review posts to GitHub via `GitHubReviewApprovalAdapter`
+3. For non-clean verdict: `PendingDraftReviewPoller` detects operator submission within 60s, session resumes and completes
 
-**Success signal:** a real pending draft review visible under your GitHub account on PR #1022, with findings that reflect the actual code in the PR.
+**Remaining concerns:**
+- `wr.routine-reviewer-family` is a shim -- reviewer families run 1-step but context is free-form (see `spawn_agent task worker mode` backlog item)
+- `paused_at_gate` coordinator fix: `fetchChildSessionResult` still returns `kind: 'success'` for both `complete` and `paused_at_gate` -- only `awaitSessions` distinguishes them at the outcome level. Not blocking for MVP but a latent type ambiguity.
+
+**Success signal:** real pending draft review visible on GitHub, with findings. Operator publishes it, session completes, `session_completed` event in logs.
+
+**GitHub issue:** #1077
 
 ---
 
@@ -332,6 +571,36 @@ All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSl
 `WorkflowEnricher` service in `src/daemon/workflow-enricher.ts`. Fires for root sessions (`spawnDepth === 0`) inside `runWorkflow()` before `buildPreAgentSession()`. `PriorNotesPolicy` discriminated type controls notes injection. 1s timeout with partial fallback on `listRecentSessions`. `EnricherResult` threaded as typed value through call chain -- trigger never mutated. All 6 entry points covered.
 
 **Pilot test gate still pending:** before declaring full success, verify agents reference prior notes in turn-1 reasoning in at least one real session.
+
+---
+
+### Richer PR context pre-assembly: inject diff, description, commits, and linked ticket before first turn (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The `context-assembly` subsystem already runs before the first LLM turn and injects a `## Prior Context` section into the system prompt. For `pr_review` tasks, it currently fetches only a file list (`gh pr diff --name-only`) and prior session notes. The agent must spend turns fetching the actual diff content, PR description, linked issues, and commit history itself -- work that deterministic scripts could do in under a second before the session starts.
+
+**What to add to `context-assembly/index.ts` for `pr_review` tasks:**
+
+- **Full diff** (`gh pr diff <n>`) -- the actual changed lines, not just filenames. Truncate to a budget (e.g. 50KB) if large; include a note when truncated. This is the single highest-value addition: the agent currently reads individual files to reconstruct what the diff is doing.
+- **PR description + body** (`gh pr view <n> --json title,body,labels,milestone,state`) -- acceptance criteria and intent live here.
+- **Linked issues** (`gh pr view <n> --json closingIssuesReferences`) -- follows "closes #N" references and fetches issue body. One level deep only.
+- **Commit list with messages** (`gh pr view <n> --json commits`) -- author intent is often clearer in commit messages than in the diff.
+- **Existing review comments** (`gh pr view <n> --json reviews,comments`) -- prior reviewer feedback and author responses. Only relevant for re-review sessions.
+
+**Where it fits:** `assembleGitDiff()` in `src/context-assembly/index.ts` already has the `pr_review` branch with the `gh` CLI call. Expanding it and adding sibling functions follows the existing pattern. The `renderContextBundle()` function adds rendered sections to the system prompt.
+
+**Implementation notes:**
+- All fetches should be parallel (`Promise.all`) with individual timeouts and graceful fallback on failure
+- The total injected context budget matters -- full diffs can be large. Use `gh pr diff --stat` as a summary fallback when diff exceeds budget
+- `contextMapping` in `triggers.yml` already passes `itemNumber: "$.pull_request.number"` -- no trigger config changes needed
+
+**Things to hash out:**
+- What's the right budget for full diff injection? 50KB covers most PRs; very large diffs need truncation with a clear note
+- Should linked issue fetch be depth-1 only, or follow issue->epic->spec chains?
+- For re-review sessions, how do we distinguish first review (no prior comments relevant) from re-review (prior comments are primary context)?
 
 ---
 
@@ -1933,6 +2202,23 @@ The `worktrain run pipeline` CLI command dispatches sessions via HTTP to the dae
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### Cognitive Verification & Subagent-Driven Auditing (June 1, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, verification step configurations require hardcoded shell commands or specific commands in the workflow definition. This compromises platform-agnosticism across bundled workflows, and treats the agent as a passive script-runner instead of an autonomous problem-solver. Furthermore, auditing a step's output is performed by the same agent session, which suffers from confirmation bias and self-justification.
+
+The system needs to shift towards cognitive/agentic verification instructions and parallel subagent auditing:
+1. **Cognitive Verification**: Allow verification configurations to be completely command-free, instructing the main agent to autonomously identify, run, write, and establish test/build verification systems to prove correctness in their workspace.
+2. **Subagent-Driven Auditing**: Enable the `verification` and `audit` configuration blocks to specify a subagent spawning directive. When hit, the engine suspends the main parent session, programmatically spawns an independent, sandboxed subagent QA auditor to inspect the parent's work, code diffs, and artifacts, and returns an objective Pass/Fail verdict with remediation guidance.
+
+**Things to hash out:**
+- How does the parent agent pass the precise context and target code changes to the subagent QA auditor?
+- Should the subagent QA auditor run in the exact same workspace worktree, or in a branched worktree to prevent hot-path mutations during parallel checks?
+- What standardized response schema (e.g. `Pass/Fail` plus `remediationNotes`) should the spawned auditing subagent return to the parent workflow to resume execution?
+
 ### Parallel tool execution in AgentLoop (May 11, 2026)
 
 **Status: idea** | Priority: high
@@ -3406,6 +3692,37 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 
 ## Workflow Library
 
+### Workflow Flavors: Parameterized Execution Profiles (May 26, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, workflows like `wr.coding-task` are monolithic and generic. To adapt them for specific domains (like UI, Kotlin, or backend), operators must either author completely separate workflow files (creating maintenance duplication) or accept generic prompts that miss domain-specific guidelines. There is no first-class way to parameterize a workflow session with a specific "flavor" that alters its prompts, injected guidelines, or verification gates while retaining a single canonical DAG definition.
+
+**Things to hash out:**
+- Should the "flavor" be explicitly configured in the trigger/session start, or dynamically inferred by the coordinator looking at the files touched in the workspace?
+- How should flavor-specific prompt additions be structured? Can we avoid inline JSON string bloat in `promptFragments` by using the reference system (`references` pointing to clean `.md` files) and just dynamically linking/injecting references based on the flavor?
+- Can a workflow support multiple simultaneous flavors (e.g., both `kotlin` and `backend`), or should it be restricted to a single primary flavor?
+- Does this compose cleanly with global `metaGuidance` template injection, allowing stack-specific rulesets to be injected workflow-wide without cluttering individual step JSON files?
+
+---
+
+### Remove human_approval gate from wr.mr-review final handoff step (May 20, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The `wr.mr-review` workflow's final handoff step (`phase-6-final-handoff`) uses `requireConfirmation: { kind: "human_approval" }` before posting the draft review to GitHub. This gate is redundant with GitHub's own draft review mechanism -- a draft review is not published until the operator explicitly submits it on GitHub. The gate currently parks the session at a local `gate_parked` state, requiring the operator to respond via `worktrain inbox respond` before anything reaches GitHub. This doubles the number of required human interactions and makes the workflow less useful for overnight autonomous operation. Since the agent posts a *draft* (not a published) review, the operator retains full control via GitHub's native submit button -- the local gate adds friction without adding safety.
+
+**Things to hash out:**
+- Should the gate be removed entirely, or replaced with a post-delivery check (confirm the draft posted successfully before completing)?
+- Does removing the gate affect how `coordinator_eval` gates upstream (phase-0, phase-5) are evaluated -- are they still correct without the final human gate?
+- What happens on a `blocking` verdict -- should the workflow still park for operator input in that case even without the standard gate?
+
+---
+
 ### Pre-specialized expert agents: on-demand consultants for main agents (May 7, 2026)
 
 **Status: idea** | Priority: high
@@ -4450,6 +4767,48 @@ The desired behavior: certain content (rules, behavioral constraints, workspace 
 - Should ephemeral content be declared in the workflow (as a `volatileContext` field) or injected by the daemon's buildSystemPrompt() at the infrastructure level?
 - Which content actually benefits from this -- rules/soul only, or also things like "current git status", "last test run output", workspace context that may change mid-session?
 - Does this interact with the WorkRail engine's `continue_workflow` step injection? Step prompts are already injected per turn via `steer()` -- is this just a generalization of that mechanism?
+
+---
+
+### Unified daemon control plane: consolidate trigger listener and console into one HTTP server (May 20, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:1 Lev:3 Con:2 | Blocked: no
+
+WorkTrain currently runs two separate HTTP servers per daemon instance: the trigger listener on port 3200 (webhooks, session steer) and the console on port 3456 (read-only session/worktree data, plus `/api/v2/auto/dispatch` bolted on). This means `worktrain dispatch` requires `worktrain console` to be running alongside the daemon, `worktrain console` cannot dispatch sessions when run standalone, and there is no single operator-facing control plane. The dispatch endpoint on the console is marked "LOCAL DEVELOPER USE ONLY" with a security TODO, which is a signal it was added to the wrong server.
+
+The right architecture is one HTTP server per daemon instance -- the trigger listener on port 3200 -- serving everything the operator and CLI need: webhooks, session steer, operator dispatch, session state queries, worktree state, trigger list, and health. The console becomes a pure frontend that reads from this one server. `worktrain dispatch`, `worktrain logs`, and all other CLI commands talk to port 3200 only. `worktrain console` opens the browser UI pointing at the same port.
+
+This would let `npm run dev:daemon` give a fully functional WorkTrain instance with one process and one port instead of requiring a second terminal for `worktrain console`.
+
+**Things to hash out:**
+- Does the console frontend need CORS changes when served from the same port as the API?
+- What happens to the standalone `worktrain console` command for users who don't have the daemon running -- does it still work as a read-only view of the session store?
+- Should the migration be incremental (mount console routes on the trigger listener in addition to the console server) or a clean cutover?
+
+---
+
+### Operator-facing capability toggles: named, discoverable WorkTrain behaviors (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+There is no operator-facing concept of "what WorkTrain does." To enable autonomous PR review, an operator must write a `github_prs_poll` trigger with the right provider, workflowId, branchStrategy, delivery config, and agent config -- 15+ lines of YAML requiring deep knowledge of WorkTrain internals. There is no way to look at a config and understand at a human level what behaviors are active. Operators cannot discover what WorkTrain is capable of, only configure it from scratch.
+
+The idea: a `capabilities.yml` or `capabilities:` section in config declares named, toggleable behaviors. Each capability is a pre-configured, opinionated behavior that just works when enabled. Examples: `pr_review` (automatically reviews open PRs assigned to a reviewer), `queue_processor` (picks up tickets assigned to WorkTrain from GitHub), `dependency_bumps` (auto-reviews and merges clean dependabot PRs), `self_improvement` (runs WorkTrain on WorkTrain's own issue queue). The capabilities layer generates the underlying triggers -- operators never write trigger YAML unless they need fine-grained control.
+
+This makes WorkTrain feel like a product rather than a framework. An operator starting fresh can enable `pr_review: true` and have it work without reading documentation about polling providers, delivery adapters, or branch strategies.
+
+**Key design question:** Is this a config-generation layer (capabilities compile down to triggers.yml at daemon start) or a replacement for triggers.yml (capabilities ARE the configuration, triggers are an implementation detail)? The first is backward compatible and lower risk; the second is the cleaner long-term UX. A discovery session is needed before implementation.
+
+**Things to hash out:**
+- Where does capability config live -- `~/.workrail/capabilities.yml`, a section in `config.json`, or alongside triggers.yml in the workspace?
+- How do capabilities interact with existing hand-written triggers -- do they coexist, override, or merge?
+- What is the right set of first-party capabilities to ship? PR review and queue processor are clear; what else is there?
+- Should capabilities expose the same configuration knobs as triggers (model, timeouts, branch strategy), or hide them entirely with sensible defaults?
+- Does `worktrain init` become the entry point for enabling capabilities, replacing manual trigger authoring?
 
 ---
 
@@ -6265,3 +6624,20 @@ This is the foundation for the console Live tab and replaces the need to run `wo
 The clean fix: add an optional `exitCode?: number` field to `CliResult.failure` (or add a new `CliResult.timeout` variant). Then `interpretCliResultWithoutDI` reads it and calls `process.exit(exitCode ?? 1)`. All existing callers are unaffected (no `exitCode` = default 1).
 
 Low priority because the sentinel works correctly today and `dispatch --wait` is the only caller that needs exit code 2.
+
+---
+
+### Subagent Spawning in Auto-Injected Auditing and Verification Steps (May 31, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, auto-injected virtual steps (audit, verification) run in-line in the main agent session. This means the main agent must execute the verification commands or perform the audit, which can introduce bias and waste parent tokens on complex verification environments.
+
+If auto-injected steps support delegating to subagents, the compiler can dynamically compile the virtual step as a `ParallelStepDefinition` instead of a standard `WorkflowStepDefinition`, spawning a specialized subagent (e.g. wr.routine-code-reviewer) to review or verify the parent step's output in an isolated, unbiased workspace.
+
+**Things to hash out:**
+- How is the parallel step's synthesis step generated? When a subagent audit completes, a dynamic synthesis step must auto-adopt the subagent's claims/findings.
+- What context variables are mapped into the child audit session from the parent?
+- Supporting custom model selection for the delegated audit subagent.

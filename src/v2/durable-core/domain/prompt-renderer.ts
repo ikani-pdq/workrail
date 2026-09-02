@@ -1,7 +1,6 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
-import type { Workflow } from '../../../types/workflow.js';
-import { getStepById } from '../../../types/workflow.js';
+import { getStepById, isParallelStepDefinition, type Workflow } from '../../../types/workflow.js';
 import type { AssessmentDefinition, PromptFragment } from '../../../types/workflow-definition.js';
 import { isLoopStepDefinition } from '../../../types/workflow-definition.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
@@ -303,7 +302,9 @@ function buildLoopContextBanner(args: {
  * Adding a new contract never requires changing this function; add getBlockedMessage()
  * to the contract file and register it here.
  */
-const CONTRACT_BLOCKED_MESSAGES: Readonly<Record<string, () => readonly string[]>> = {
+const CONTRACT_BLOCKED_MESSAGES: Readonly<
+  Record<string, (options?: { readonly isAutonomous?: boolean }) => readonly string[]>
+> = {
   [LOOP_CONTROL_CONTRACT_REF]: getLoopControlBlockedMessage,
   [REVIEW_VERDICT_CONTRACT_REF]: getReviewVerdictBlockedMessage,
   [DISCOVERY_HANDOFF_CONTRACT_REF]: getDiscoveryHandoffBlockedMessage,
@@ -318,12 +319,13 @@ const CONTRACT_BLOCKED_MESSAGES: Readonly<Record<string, () => readonly string[]
  * Delegates to each contract's getBlockedMessage() so contracts own their guidance.
  */
 function formatOutputContractRequirements(
-  outputContract: { readonly contractRef?: string } | undefined
+  outputContract: { readonly contractRef?: string } | undefined,
+  options?: { readonly isAutonomous?: boolean },
 ): readonly string[] {
   const contractRef = outputContract?.contractRef;
   if (!contractRef) return [];
   const getMsg = CONTRACT_BLOCKED_MESSAGES[contractRef];
-  if (getMsg) return getMsg();
+  if (getMsg) return getMsg(options);
   // Unknown contract: generic fallback
   return [
     `Artifact contract: ${contractRef}`,
@@ -449,6 +451,7 @@ export interface StepMetadata {
   readonly title: string;
   readonly prompt: string;
   readonly agentRole?: string;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   readonly requireConfirmation: boolean;
   /**
    * The kind of gate this step requires. Only present when requireConfirmation is true.
@@ -523,6 +526,7 @@ export function renderPendingPrompt(args: {
     });
   }
   const agentRole = step.agentRole;
+  const modelTier = step.modelTier;
   const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
@@ -571,29 +575,147 @@ export function renderPendingPrompt(args: {
   // Loop vars take precedence over session context (they are derived from it but more specific)
   const renderContext: Record<string, unknown> = { ...sessionContext, ...loopRenderContext };
 
+  if (isParallelStepDefinition(step)) {
+    // 1. Evaluate delegation conditions and identify active ones
+    const activeDelegations = step.parallelDelegations.filter((delegation) => {
+      if (!delegation.runCondition) return true;
+      return evaluateCondition(delegation.runCondition, renderContext);
+    });
+
+    const cleanResponseFormat = args.cleanResponseFormat ?? false;
+    const baseTitle = resolveContextTemplates(step.title, renderContext);
+
+    let finalPrompt = '';
+
+    if (activeDelegations.length > 0) {
+      const activeBlocks = activeDelegations.map((delegation, idx) => {
+        // Build the fanned-out input parameters
+        const resolvedInputs: Record<string, string> = {};
+
+        // A. Process standard context mapping
+        if (delegation.contextMapping) {
+          for (const [parentKey, childKey] of Object.entries(delegation.contextMapping)) {
+            const val = renderContext[parentKey];
+            if (val !== undefined && val !== null) {
+              resolvedInputs[childKey] = String(val);
+            }
+          }
+        }
+
+        // B. Process static overrides (args) - takes precedence
+        if (delegation.args) {
+          for (const [childKey, staticValue] of Object.entries(delegation.args)) {
+            resolvedInputs[childKey] = staticValue;
+          }
+        }
+
+        const inputLines = Object.entries(resolvedInputs)
+          .map(([k, v]) => `    *   \`${k}\`: \`${v}\``)
+          .join('\n');
+
+        // Derive a goal for spawn_agent (required by daemon path).
+        // Prefer an explicit goal from the workflow definition; fall back to
+        // a generated description based on args.familyName or workflowId.
+        const delegationGoal: string = delegation.goal
+          ?? (delegation.args?.['familyName']
+              ? `Run ${delegation.args['familyName']} review family for workflow ${delegation.workflowId}`
+              : `Run ${delegation.workflowId}`);
+
+        return `#### Subagent ${idx + 1}: ${delegation.workflowId}\n` +
+          `*   **Workflow ID to Spawn**: \`${delegation.workflowId}\`\n` +
+          `*   **Goal**: ${delegationGoal}\n` +
+          (delegation.allowedTools && delegation.allowedTools.length > 0
+            ? `*   **Allowed Tools**: ${delegation.allowedTools.join(', ')}\n`
+            : '') +
+          `*   **Target Input Parameters (Context)**:\n` +
+          (inputLines ? inputLines : `    *   *(No input parameters)*`);
+      }).join('\n\n');
+
+      finalPrompt = `# Parallel Subagent Spawning Phase\n\n` +
+        `You are initiating a parallel execution phase. Please spawn the following subagents simultaneously using your native client-side subagent tools (e.g. \`spawn_agent\` starting a fresh \`start_workflow\` session for each).\n\n` +
+        `### Active Delegations\n\n` +
+        `${activeBlocks}\n\n` +
+        `---\n\n` +
+        `### Procedure\n` +
+        `1. Spawn the active subagents listed above in parallel.\n` +
+        `2. Wait for all subagents to complete their runs and write their findings to disk.\n` +
+        `3. Once completed, confirm all deliverables exist, then call \`continue_workflow\` to advance to the synthesis phase.`;
+    } else {
+      finalPrompt = `# Parallel Subagent Spawning Phase (Bypassed)\n\n` +
+        `All parallel delegations for this step evaluated their conditions to false, meaning no subagents need to be spawned.\n\n` +
+        `Please immediately call \`continue_workflow\` to advance to the next step.`;
+    }
+
+    // Append recovery context if in rehydrateOnly mode
+    if (args.rehydrateOnly) {
+      const projectionsRes = loadRecoveryProjections({ truth: args.truth, runId: args.runId });
+      if (projectionsRes.isOk()) {
+        const { run, outputs } = projectionsRes.value;
+        const segments = buildRecoverySegments({
+          nodeId: args.nodeId,
+          run,
+          outputs,
+          workflow: args.workflow,
+          stepId: args.stepId,
+          loopPath: args.loopPath,
+          functionReferences: step.functionReferences ?? [],
+        });
+        if (segments.length > 0) {
+          const recoveryHeader = cleanResponseFormat ? 'Your previous work:' : '## Recovery Context';
+          const recoveryText = renderBudgetedRehydrateRecovery({
+            header: recoveryHeader,
+            segments,
+          }).text;
+          finalPrompt = `${finalPrompt}\n\n${recoveryText}`;
+        }
+      }
+    }
+
+    return ok({
+      stepId: args.stepId,
+      title: baseTitle,
+      prompt: finalPrompt,
+      agentRole: step.agentRole,
+      requireConfirmation: false,
+      ...(modelTier !== undefined ? { modelTier } : {}),
+    });
+  }
+
   // Evaluate requireConfirmation after renderContext is built so that condition-form values
   // (e.g. { var: 'taskComplexity', equals: 'Large' }) are evaluated against live session context.
   // Boolean(conditionObject) would always be true -- we need evaluateCondition() here.
   //
-  // Object form { kind: 'coordinator_eval' | 'human_approval' }: extract gateKind FIRST,
-  // then treat the value as boolean true. Must happen before evaluateCondition() since
-  // { kind: '...' } is not a valid condition expression.
-  let rc = step.requireConfirmation;
-  let gateKind: import('../constants.js').GateKind | undefined;
-  if (typeof rc === 'object' && rc !== null && !Array.isArray(rc) && 'kind' in rc) {
-    const kindObj = rc as { kind: string };
-    if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
-      gateKind = kindObj.kind as import('../constants.js').GateKind;
-      rc = true; // normalize to boolean for the requireConfirmation evaluation below
+  // Object form { kind: 'coordinator_eval' | 'human_approval', condition?: Condition }: extract gateKind FIRST,
+  // then treat the value as boolean true or evaluate condition since { kind: '...' } is not a valid condition expression.
+  const rawRc = step.requireConfirmation;
+  const { conditionToEvaluate, initialRc, gateKindFromObj } = (() => {
+    if (typeof rawRc === 'object' && rawRc !== null && !Array.isArray(rawRc) && 'kind' in rawRc) {
+      const kindObj = rawRc as { kind: string; condition?: unknown };
+      if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
+        const extractedKind = kindObj.kind as import('../constants.js').GateKind;
+        if ('condition' in kindObj) {
+          return { conditionToEvaluate: kindObj.condition, initialRc: rawRc, gateKindFromObj: extractedKind };
+        } else {
+          return { conditionToEvaluate: undefined, initialRc: true, gateKindFromObj: extractedKind };
+        }
+      }
     }
-  }
-  const requireConfirmation = rc === true || rc === false || rc === undefined
-    ? Boolean(rc)
-    : evaluateCondition(rc as Exclude<typeof rc, { kind: string }>, renderContext);
+    return { conditionToEvaluate: undefined, initialRc: rawRc, gateKindFromObj: undefined };
+  })();
+
+  const requireConfirmation = conditionToEvaluate !== undefined
+    ? evaluateCondition(conditionToEvaluate, renderContext)
+    : (initialRc === true || initialRc === false || initialRc === undefined
+        ? Boolean(initialRc)
+        : evaluateCondition(initialRc as Exclude<typeof initialRc, { kind: string }>, renderContext));
+
   // Default gateKind to 'coordinator_eval' when requireConfirmation is true but no kind was specified.
-  if (requireConfirmation && gateKind === undefined) {
-    gateKind = 'coordinator_eval';
-  }
+  const gateKind = (() => {
+    if (requireConfirmation) {
+      return gateKindFromObj ?? 'coordinator_eval';
+    }
+    return undefined;
+  })();
 
   // Resolve both prompt and title — titles are agent-visible (inspect output, UI headers).
   // prompt is optional (steps may use promptBlocks instead); default to '' so the resolver
@@ -617,7 +739,8 @@ export function renderPendingPrompt(args: {
       : `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
     : '';
   
-  const contractRequirements = formatOutputContractRequirements(outputContract);
+  const isAutonomous = sessionContext.is_autonomous === true || sessionContext.is_autonomous === 'true';
+  const contractRequirements = formatOutputContractRequirements(outputContract, { isAutonomous });
   const contractSection = contractRequirements.length > 0
     ? cleanResponseFormat
       ? `\n\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
@@ -743,7 +866,15 @@ export function renderPendingPrompt(args: {
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation, ...(gateKind !== undefined ? { gateKind } : {}) });
+    return ok({
+      stepId: args.stepId,
+      title: baseTitle,
+      prompt: enhancedPrompt,
+      agentRole,
+      requireConfirmation,
+      ...(gateKind !== undefined ? { gateKind } : {}),
+      ...(modelTier !== undefined ? { modelTier } : {}),
+    });
   }
 
   // Rehydrate-only: load recovery projections (extracted helper)
@@ -756,6 +887,7 @@ export function renderPendingPrompt(args: {
       agentRole,
       requireConfirmation,
       ...(gateKind !== undefined ? { gateKind } : {}),
+      ...(modelTier !== undefined ? { modelTier } : {}),
     });
   }
 
@@ -774,7 +906,14 @@ export function renderPendingPrompt(args: {
 
   // No recovery content
   if (segments.length === 0) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation });
+    return ok({
+      stepId: args.stepId,
+      title: baseTitle,
+      prompt: enhancedPrompt,
+      agentRole,
+      requireConfirmation,
+      ...(modelTier !== undefined ? { modelTier } : {}),
+    });
   }
 
   // Combine and apply budget with tier-aware recovery rendering.
@@ -785,5 +924,13 @@ export function renderPendingPrompt(args: {
   }).text;
   const finalPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
 
-  return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, agentRole, requireConfirmation, ...(gateKind !== undefined ? { gateKind } : {}) });
+  return ok({
+    stepId: args.stepId,
+    title: baseTitle,
+    prompt: finalPrompt,
+    agentRole,
+    requireConfirmation,
+    ...(gateKind !== undefined ? { gateKind } : {}),
+    ...(modelTier !== undefined ? { modelTier } : {}),
+  });
 }

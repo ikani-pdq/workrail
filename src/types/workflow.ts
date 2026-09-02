@@ -8,7 +8,7 @@
  * Add new runtime metadata fields here as needed.
  */
 
-import { WorkflowDefinition, WorkflowStepDefinition, LoopStepDefinition } from './workflow-definition';
+import { WorkflowDefinition, WorkflowStepDefinition, LoopStepDefinition, ParallelStepDefinition, StandardStepDefinition } from './workflow-definition';
 import { WorkflowSource, getSourceDisplayName } from './workflow-source';
 
 // =============================================================================
@@ -45,7 +45,7 @@ export interface Workflow {
    * All steps (top-level and loop-body) indexed by step ID.
    * Enables O(1) replacement of the linear scan in getStepById.
    */
-  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition>;
+  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>;
 
   /**
    * Maps each loop-body step ID to its parent LoopStepDefinition.
@@ -103,16 +103,16 @@ export interface WorkflowSourceInfo {
  * Called once at createWorkflow() time -- O(n) upfront, O(1) per lookup thereafter.
  */
 function buildWorkflowIndices(definition: WorkflowDefinition): {
-  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition>;
+  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>;
   readonly parentLoopByStepId: ReadonlyMap<string, LoopStepDefinition>;
   readonly loopById: ReadonlyMap<string, LoopStepDefinition>;
 } {
-  const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
+  const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>();
   const parentLoopByStepId = new Map<string, LoopStepDefinition>();
   const loopById = new Map<string, LoopStepDefinition>();
 
   function indexSteps(
-    steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
+    steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[],
     parentLoop: LoopStepDefinition | null
   ): void {
     for (const step of steps) {
@@ -193,7 +193,7 @@ export function toWorkflowSourceInfo(source: WorkflowSource): WorkflowSourceInfo
 export function getStepById(
   workflow: Workflow,
   stepId: string
-): WorkflowStepDefinition | LoopStepDefinition | null {
+): WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition | null {
   return workflow.stepById.get(stepId) ?? null;
 }
 
@@ -258,7 +258,10 @@ export function isWorkflowDefinition(obj: unknown): obj is WorkflowDefinition {
 export type {
   WorkflowDefinition,
   WorkflowStepDefinition,
+  StandardStepDefinition,
   LoopStepDefinition,
+  ParallelStepDefinition,
+  ParallelDelegation,
   LoopConfigDefinition,
   FunctionDefinition,
   FunctionParameter,
@@ -267,7 +270,8 @@ export type {
 
 export {
   isLoopStepDefinition,
-  isWorkflowStepDefinition,
+  isStandardStepDefinition,
+  isParallelStepDefinition,
   hasWorkflowDefinitionShape
 } from './workflow-definition';
 

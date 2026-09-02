@@ -24,6 +24,15 @@
       "minLength": 1,
       "maxLength": 512
     },
+    "modelTier": {
+      "type": "string",
+      "enum": [
+        "lightweight",
+        "mid",
+        "heavy"
+      ],
+      "description": "Default model tier/category recommended for this workflow (lightweight, mid, or heavy)."
+    },
     "version": {
       "type": "string",
       "description": "Semantic version of the workflow (e.g., 0.0.1, 0.1.0)",
@@ -64,6 +73,9 @@
           },
           {
             "$ref": "#/$defs/loopStep"
+          },
+          {
+            "$ref": "#/$defs/parallelStep"
           }
         ]
       },
@@ -423,6 +435,15 @@
           "minLength": 10,
           "maxLength": 1024
         },
+        "modelTier": {
+          "type": "string",
+          "enum": [
+            "lightweight",
+            "mid",
+            "heavy"
+          ],
+          "description": "Recommended model tier/category for executing this step (lightweight, mid, or heavy)."
+        },
         "guidance": {
           "type": "array",
           "items": {
@@ -512,6 +533,12 @@
             "$ref": "#/$defs/promptFragment"
           },
           "minItems": 1
+        },
+        "audit": {
+          "$ref": "#/$defs/auditConfig"
+        },
+        "verification": {
+          "$ref": "#/$defs/verificationConfig"
         }
       },
       "required": [
@@ -550,7 +577,14 @@
               "type": "array",
               "description": "Array of inline step definitions to execute in the loop",
               "items": {
-                "$ref": "#/$defs/standardStep"
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/standardStep"
+                  },
+                  {
+                    "$ref": "#/$defs/parallelStep"
+                  }
+                ]
               },
               "minItems": 1
             }
@@ -799,6 +833,10 @@
         "in": {
           "type": "array",
           "description": "Check if variable value is in this array of allowed values"
+        },
+        "contains": {
+          "type": "string",
+          "description": "Check if variable string or array representation contains this value"
         }
       },
       "additionalProperties": false
@@ -845,6 +883,10 @@
               "type": "string",
               "enum": ["coordinator_eval", "human_approval"],
               "description": "coordinator_eval: spawn wr.gate-eval-generic; human_approval: route to human approval mechanism (e.g. GitHub draft review)"
+            },
+            "condition": {
+              "$ref": "#/$defs/condition",
+              "description": "Conditional logic that determines if confirmation is required"
             }
           },
           "required": ["kind"],
@@ -1275,6 +1317,165 @@
       },
       "required": [
         "templateId"
+      ],
+      "additionalProperties": false
+    },
+    "auditConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual self-auditing step.",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Custom prompt instructions to audit the parent step's deliverables.",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "rubric": {
+          "type": "array",
+          "description": "Concrete evaluation dimensions to guide the auditor's judgment.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "synthesisConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual fanning-in synthesis step.",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Custom prompt instructions to synthesize and verify parallel subagent deliverables.",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "outputContract": {
+          "$ref": "#/$defs/outputContract",
+          "description": "Expected structured result contract after consolidating child findings."
+        }
+      },
+      "additionalProperties": false
+    },
+    "verificationConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual shell command verification step.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The automated shell command to execute for verifying deliverables.",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Custom instructions to guide the verification process.",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": false
+    },
+    "parallelStep": {
+      "type": "object",
+      "description": "A step that spawns subagents or routines to execute concurrently in isolated cognitive contexts.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId",
+          "description": "Unique identifier for the parallel step"
+        },
+        "type": {
+          "const": "parallel",
+          "description": "Identifies this as a parallel step type"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-friendly title of the parallel step",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "parallelDelegations": {
+          "type": "array",
+          "description": "List of subagents or routines to execute in parallel",
+          "items": {
+            "$ref": "#/$defs/parallelDelegation"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "requireConfirmation": {
+          "$ref": "#/$defs/confirmationRule"
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition"
+        },
+        "notesOptional": {
+          "type": "boolean",
+          "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt."
+        },
+        "synthesis": {
+          "$ref": "#/$defs/synthesisConfig"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "parallelDelegations"
+      ],
+      "additionalProperties": false
+    },
+    "parallelDelegation": {
+      "type": "object",
+      "description": "A single subagent or routine cognitive delegation.",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "description": "ID of the subagent workflow or routine to invoke",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "goal": {
+          "type": "string",
+          "description": "Goal description for this delegation, used by spawn_agent."
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition",
+          "description": "Optional condition to determine if this delegation should run."
+        },
+        "contextMapping": {
+          "type": "object",
+          "description": "Mapping from parent context keys to child input keys",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "object",
+          "description": "Static key-value overrides passed directly to the child context",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "modelTier": {
+          "type": "string",
+          "enum": [
+            "lightweight",
+            "mid",
+            "heavy"
+          ],
+          "description": "Recommended model tier/category for executing this delegation (lightweight, mid, or heavy)."
+        },
+        "allowedTools": {
+          "type": "array",
+          "description": "Tool names surfaced to the spawned agent as a hint. When absent the agent inherits the default tool set. Not yet structurally enforced: the child session tool set is not restricted by this field; wiring to the session layer is a follow-up. Must be non-empty when present.",
+          "items": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_:\\-]*$" },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "workflowId"
       ],
       "additionalProperties": false
     }

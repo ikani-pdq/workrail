@@ -14,9 +14,9 @@ import { promisify } from 'node:util';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import type { V2ToolContext } from '../../mcp/types.js';
-import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
+import { executeStartWorkflow } from '../../v2/usecases/start-workflow.js';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
-import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
+import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { createSessionState, updateToken, setSessionId } from '../state/index.js';
 import { buildAgentClient } from '../core/index.js';
@@ -50,7 +50,7 @@ const execFileAsync = promisify(execFile);
 export async function buildPreAgentSession(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   sessionId: RunId,
   startMs: number,
   statsDir: string,
@@ -96,10 +96,28 @@ export async function buildPreAgentSession(
     checkpointToken = s.checkpointToken ?? null;
     firstStepPrompt = s.firstStepPrompt;
     isComplete = s.isComplete;
+    state.pendingStepIdAfterAdvance = s.stepId ?? null;
   } else {
     const startResult = await executeStartWorkflow(
+      {
+        gate: ctx.v2.gate,
+        sessionStore: ctx.v2.sessionStore,
+        snapshotStore: ctx.v2.snapshotStore,
+        pinnedStore: ctx.v2.pinnedStore,
+        crypto: ctx.v2.crypto,
+        tokenCodecPorts: ctx.v2.tokenCodecPorts,
+        idFactory: ctx.v2.idFactory,
+        validationPipelineDeps: ctx.v2.validationPipelineDeps,
+        tokenAliasStore: ctx.v2.tokenAliasStore,
+        entropy: ctx.v2.entropy,
+        resolvedRootUris: ctx.v2.resolvedRootUris,
+        rememberedRootsStore: ctx.v2.rememberedRootsStore,
+        managedSourceStore: ctx.v2.managedSourceStore,
+        workspaceResolver: ctx.v2.workspaceResolver,
+        fallbackWorkflowReader: ctx.workflowService,
+        featureFlags: ctx.featureFlags,
+      },
       { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
-      ctx,
       { is_autonomous: 'true', workspacePath: trigger.workspacePath, triggerSource: 'daemon' },
     );
     if (startResult.isErr()) {
@@ -115,11 +133,12 @@ export async function buildPreAgentSession(
         handle: undefined,
       };
     }
-    const r = startResult.value.response;
-    continueToken = r.continueToken ?? '';
-    checkpointToken = r.checkpointToken ?? null;
-    firstStepPrompt = r.pending?.prompt ?? '';
-    isComplete = r.isComplete;
+    const r = startResult.value;
+    continueToken = r.continueToken;
+    checkpointToken = r.checkpointToken;
+    firstStepPrompt = r.meta.prompt;
+    isComplete = (r as any).isComplete ?? false;
+    state.pendingStepIdAfterAdvance = r.meta.stepId;
   }
   updateToken(state, continueToken);
 
@@ -141,6 +160,7 @@ export async function buildPreAgentSession(
       workflowId: trigger.workflowId,
       goal: trigger.goal,
       workspacePath: trigger.workspacePath,
+      context: trigger.context,
     });
     if (persistResult.kind === 'err') {
       return {
@@ -185,7 +205,7 @@ export async function buildPreAgentSession(
 
       const worktreePersistResult = await persistTokens(
         sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath },
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, context: trigger.context },
       );
       if (worktreePersistResult.kind === 'err') {
         console.error(`[WorkflowRunner] Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
@@ -248,7 +268,7 @@ export async function buildPreAgentSession(
 
       const worktreePersistResult = await persistTokens(
         sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only' },
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only', context: trigger.context },
       );
       if (worktreePersistResult.kind === 'err') {
         console.error(`[WorkflowRunner] Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);

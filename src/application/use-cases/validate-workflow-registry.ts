@@ -8,7 +8,7 @@ import { resolveWorkflowCandidates, detectDuplicateIds } from '../../infrastruct
 import type { RawWorkflowFile, VariantKind, ParsedRawWorkflowFile } from './raw-workflow-file-scanner.js';
 import { scanRawWorkflowFiles } from './raw-workflow-file-scanner.js';
 import { getSourcePath } from '../../types/workflow-source.js';
-import { createWorkflow } from '../../types/workflow.js';
+import { createWorkflow, isParallelStepDefinition } from '../../types/workflow.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry Snapshot Type
@@ -121,11 +121,120 @@ export function validateRegistry(
     resolvedWinnerIds.add(workflow.definition.id);
   }
 
+  // Build delegation graph for transitive cycle checking
+  const delegationGraph = new Map<string, Set<string>>();
+  for (const { workflow } of snapshot.resolved) {
+    const targets = new Set<string>();
+    for (const step of workflow.stepById.values()) {
+      if (isParallelStepDefinition(step)) {
+        for (const delegation of step.parallelDelegations) {
+          targets.add(delegation.workflowId);
+        }
+      }
+    }
+    delegationGraph.set(workflow.definition.id, targets);
+  }
+
+  function checkCycle(
+    currentId: string,
+    visited: Set<string>,
+    recStack: Set<string>,
+    path: string[]
+  ): string[] | null {
+    visited.add(currentId);
+    recStack.add(currentId);
+    path.push(currentId);
+
+    const neighbors = delegationGraph.get(currentId);
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          const cyclePath = checkCycle(neighbor, visited, recStack, path);
+          if (cyclePath) return cyclePath;
+        } else if (recStack.has(neighbor)) {
+          return [...path, neighbor];
+        }
+      }
+    }
+
+    recStack.delete(currentId);
+    path.pop();
+    return null;
+  }
+
   // Step 1: Validate all resolved workflows (full Phase 1a pipeline)
   const resolvedResults: ResolvedValidationEntry[] = [];
 
   for (const { workflow, resolvedBy } of snapshot.resolved) {
-    const outcome = validateWorkflowPhase1a(workflow, deps);
+    let outcome = validateWorkflowPhase1a(workflow, deps);
+
+    // Cross-reference checking for parallel steps in this workflow
+    const crossRefIssues: string[] = [];
+    for (const step of workflow.stepById.values()) {
+      if (isParallelStepDefinition(step)) {
+        for (const delegation of step.parallelDelegations) {
+          const targetId = delegation.workflowId;
+
+          // 1. Prohibit circular self-referencing
+          if (targetId === workflow.definition.id) {
+            crossRefIssues.push(
+              `Step '${step.id}' delegates to itself (self-spawning circular loop is prohibited)`
+            );
+          }
+
+          // 2. Validate targetId exists in registry
+          if (!resolvedWinnerIds.has(targetId)) {
+            crossRefIssues.push(
+              `Step '${step.id}' delegates to unregistered workflow ID '${targetId}'`
+            );
+          }
+        }
+      }
+    }
+
+    // 3. Detect transitive spawning cycles starting from this workflow
+    const visited = new Set<string>();
+    const recStack = new Set<string>();
+    const path: string[] = [];
+    const cycle = checkCycle(workflow.definition.id, visited, recStack, path);
+    if (cycle) {
+      crossRefIssues.push(
+        `Transitive circular spawning cycle detected: ${cycle.join(' -> ')}`
+      );
+    }
+
+    if (crossRefIssues.length > 0) {
+      if (outcome.kind === 'phase1a_valid') {
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: crossRefIssues,
+        };
+      } else if (outcome.kind === 'structural_failed') {
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: [...outcome.issues, ...crossRefIssues],
+        };
+      } else {
+        const underlyingMessage = outcome.kind === 'schema_failed'
+          ? `Schema validation failed: ${outcome.errors.map(e => e.message ?? e.instancePath).join('; ')}`
+          : outcome.kind === 'v1_compilation_failed'
+            ? `Compilation failed: ${outcome.cause.message}`
+            : outcome.kind === 'normalization_failed'
+              ? `Normalization failed: ${outcome.cause.message}`
+              : outcome.kind === 'executable_compilation_failed'
+                ? `Executable compilation failed: ${outcome.cause.message}`
+                : 'Unknown pipeline failure';
+
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: [underlyingMessage, ...crossRefIssues],
+        };
+      }
+    }
+
     resolvedResults.push({
       workflowId: workflow.definition.id,
       sourceRef: extractSourceRef(resolvedBy),

@@ -158,6 +158,23 @@ export function getSchemas(): Record<string, any> {
           additionalProperties: true,
           description: 'Optional initial context variables to pass to the child workflow. Used for single-spawn form only.',
         },
+        agentConfig: {
+          type: 'object',
+          properties: {
+            modelTier: {
+              type: 'string',
+              enum: ['lightweight', 'mid', 'heavy'],
+              description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
+            }
+          },
+          additionalProperties: false,
+          description: "Optional custom agent configuration for the child session (single-spawn form only). Note: the 'model' string field is no longer supported; use 'modelTier' ('lightweight', 'mid', or 'heavy') instead."
+        },
+        allowedTools: {
+          type: 'array',
+          description: 'Tool names surfaced as a hint. Not yet structurally enforced at the session layer. Absent = inherit default tool set.',
+          items: { type: 'string' }, minItems: 1,
+        },
         agents: {
           type: 'array',
           // NOTE: top-level required[] is absent because the schema accepts two forms
@@ -176,6 +193,23 @@ export function getSchemas(): Record<string, any> {
               goal: { type: 'string', description: 'Goal for this child session.' },
               workspacePath: { type: 'string', description: 'Workspace path for this child session.' },
               context: { type: 'object', additionalProperties: true, description: 'Optional context variables.' },
+              agentConfig: {
+                type: 'object',
+                properties: {
+                  modelTier: {
+                    type: 'string',
+                    enum: ['lightweight', 'mid', 'heavy'],
+                    description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
+                  }
+                },
+                additionalProperties: false,
+                description: 'Optional custom agent configuration for the child session.'
+              },
+              allowedTools: {
+                type: 'array',
+                description: 'Tool names surfaced as a hint. Not yet structurally enforced at the session layer. Absent = inherit default tool set.',
+                items: { type: 'string' }, minItems: 1,
+              },
             },
             required: ['workflowId', 'goal', 'workspacePath'],
             additionalProperties: false,

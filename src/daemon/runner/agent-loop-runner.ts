@@ -38,8 +38,9 @@ import { ActiveSessionSet } from '../active-sessions.js';
 import { withWorkrailSession } from '../tools/_shared.js';
 import { injectPendingSteps } from '../turn-end/step-injector.js';
 import { flushConversation } from '../turn-end/conversation-flusher.js';
+import { SessionCortex } from '../cortex/session-cortex.js';
 import type { WorkflowTrigger } from '../types.js';
-import type { PreAgentSession, AgentReadySession, SessionOutcome } from './runner-types.js';
+import type { PreAgentSession, AgentReadySession, SessionOutcome, SessionPaths } from './runner-types.js';
 import { getSchemas } from './tool-schemas.js';
 import { constructTools } from './construct-tools.js';
 import type { runWorkflow } from '../workflow-runner.js';
@@ -73,6 +74,7 @@ export interface TurnEndSubscriberContext {
    */
   readonly lastFlushedRef: { count: number };
   readonly stuckRepeatThreshold: number;
+  readonly cortex?: SessionCortex;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,11 @@ export function buildTurnEndSubscriber(
 
     // Conversation history: delta-append after each turn.
     flushConversation(ctx.agent.state.messages, ctx.lastFlushedRef, ctx.conversationPath, appendConversationMessages);
+
+    // Cortex intervention: intercept rejections and inject guidance
+    if (ctx.cortex) {
+      await ctx.cortex.handleTurnEnd(event, ctx.state);
+    }
 
     // Steer injection: drain pendingSteerParts into the next turn.
     injectPendingSteps(ctx.state, ctx.agent);
@@ -244,7 +251,7 @@ export async function buildAgentReadySession(
   preAgentSession: PreAgentSession,
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   sessionId: RunId,
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
@@ -327,6 +334,7 @@ export async function buildAgentReadySession(
     triggerWorkspacePath: trigger.workspacePath,
     triggerGoal: trigger.goal ?? '',
     triggerBranchStrategy: trigger.branchStrategy,
+    triggerContext: trigger.context,
     activeSessionSet,
     // C2: pass the parent activity notifier through scope so constructTools can
     // forward it to makeSpawnAgentTool. When a grandchild spawns further children,
@@ -401,8 +409,9 @@ export async function buildAgentReadySession(
 export async function runAgentLoop(
   session: AgentReadySession,
   trigger: WorkflowTrigger,
-  conversationPath: string,
+  sessionPaths: SessionPaths,
 ): Promise<SessionOutcome> {
+  const { conversationPath, cortexPath } = sessionPaths;
   const { agent, preAgentSession, sessionCtx, sessionId, handle } = session;
   const { state } = preAgentSession;
   const { emitter } = session.scope;
@@ -419,6 +428,9 @@ export async function runAgentLoop(
 
   const lastFlushedRef = { count: 0 };
 
+  const cortex = new SessionCortex(cortexPath);
+  await cortex.load(state.pendingStepIdAfterAdvance);
+
   const unsubscribe = agent.subscribe(buildTurnEndSubscriber({
     agent,
     state,
@@ -429,6 +441,7 @@ export async function runAgentLoop(
     conversationPath,
     lastFlushedRef,
     stuckRepeatThreshold,
+    cortex,
   }));
 
   let stopReason = 'stop';

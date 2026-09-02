@@ -75,6 +75,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
   it('start_workflow: exact field set', () => {
     expect(extractFieldNames(V2StartWorkflowInput)).toEqual([
       'goal',
+      'modelTier',
       'workflowId',
       'workspacePath',
     ]);
@@ -92,10 +93,12 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
 
   it('continue_workflow validation boundary: exact field set', () => {
     expect(extractFieldNames(V2ContinueWorkflowInput)).toEqual([
+      'artifacts',
       'context',
       'contextVariables',
       'continueToken',
       'intent',
+      'notes',
       'output',
       'workspacePath',
     ]);

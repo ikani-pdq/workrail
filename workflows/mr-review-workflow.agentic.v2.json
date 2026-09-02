@@ -1,7 +1,7 @@
 {
   "id": "wr.mr-review",
   "name": "MR Review Workflow",
-  "version": "2.9.0",
+  "version": "2.12.0",
   "description": "Evidence-driven MR review with intent-first gating, caller enumeration for transitive regression detection, per-family checklists with finding caps, causal attribution enforcement, hidden reflection scoring, and a typed verdict schema with file/line anchors.",
   "about": "## MR Review Workflow\n\nThis workflow conducts a structured, evidence-driven code review of a merge request or pull request. It is designed for cases where you want a thorough, audit-quality review rather than a quick glance -- particularly when the change touches critical surfaces, spans many files, or carries real production risk.\n\n**What it does:**\nThe workflow locates and bounds the review target, enumerates callers of changed functions to detect transitive regressions, checks intent alignment before correctness, freezes a neutral fact packet, runs parallel reviewer families each with domain-specific checklists and a finding cap, applies hidden reflection scoring to suppress low-confidence findings, reconciles contradictions, stress-tests the recommendation adversarially, and produces a final handoff with severity-graded, file/line-anchored findings and a typed verdict.\n\n**When to use it:**\n- Before merging a PR that touches auth, data models, APIs, or critical paths\n- When you want independent perspectives on a change without the noise of an unstructured review\n- When the change is large or the reviewer is unfamiliar with the surrounding code\n- When you need a reproducible audit trail for compliance or team review processes\n\n**What it produces:**\nA final review recommendation (approve / request changes / needs discussion) with a confidence band, severity-graded findings anchored to specific files and lines, ready-to-post MR comments, a coverage ledger, and a typed `wr.review_verdict` artifact.\n\n**How to get good results:**\nProvide the PR URL, branch name, or diff. If the change has non-obvious intent, a one-sentence description of the goal helps. The workflow will not post comments or approve/reject without explicit instruction.",
   "examples": [
@@ -27,7 +27,10 @@
         {
           "id": "evidence_quality",
           "purpose": "Each finding cites a specific file, function, or line. No finding relies on intuition or pattern-matching without concrete grounding.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -38,7 +41,10 @@
         {
           "id": "coverage_completeness",
           "purpose": "All material review domains are checked or explicitly acknowledged as gaps in the coverage ledger.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -49,7 +55,10 @@
         {
           "id": "contradiction_resolution",
           "purpose": "Every material contradiction is resolved by evidence or explicitly acknowledged with a stated position and rationale.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -60,7 +69,10 @@
         {
           "id": "finding_schema_compliance",
           "purpose": "Every Critical/Major finding has: specific file+line, causal link explaining why this PR introduced or worsened it, and a concrete remediation or verification step. Findings without all three are flags, not actionable review comments.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     }
@@ -94,11 +106,17 @@
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Locate, Bound, Enrich, Classify & Enumerate Callers",
-      "prompt": "Build the review foundation in one pass, including transitive impact discovery.\n\n**Step 1 -- Early exit / minimum inputs:**\nBefore exploring, verify that the review target is real and inspectable. If the diff, changed files, or equivalent review material are completely absent and cannot be inferred with tools, ask for the minimum missing artifact and stop. Do NOT ask questions you can resolve with tools.\n\n**Step 2 -- Locate and bound the review target:**\nAttempt to determine the strongest available review target and boundary.\n\nAttempt to establish:\n- `reviewTargetKind` from the strongest available source (PR/MR, branch, patch, diff, or local working tree changes)\n- `reviewTargetSource` describing where the target came from\n- likely PR/MR identity when available (`prUrl`, `prNumber`)\n- likely base / ancestor reference (`baseCandidate`, `mergeBaseRef`) when available\n- whether the branch may include inherited or out-of-scope changes\n- `boundaryConfidence`: High / Medium / Low\n\nDo not over-prescribe your own investigation path. Use the strongest available evidence and record uncertainty honestly.\n\n**Step 3 -- Enrich with context:**\nRecover the strongest available intent and policy context.\n\nAttempt to recover:\n- MR title, purpose, and PR description\n- ticket / issue / acceptance context (`ticketRefs`, `ticketContext`)\n- supporting docs / specs / rollout context (`supportingDocsFound`)\n- repo or user policy/convention context (`policySourcesFound`) -- check AGENTS.md, CLAUDE.md, .workrail/review-rules.md, or equivalent\n- `contextConfidence`: High / Medium / Low\n\n**Step 4 -- Review-surface hygiene:**\nClassify the visible change into a minimal review surface.\n\nSet:\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n\n**Step 5 -- Classify the review:**\nAfter exploration, classify the work.\n\nSet:\n- `reviewMode`: QUICK / STANDARD / THOROUGH\n- `riskLevel`: Low / Medium / High\n- `shapeProfile`: `isolated_change`, `crosscutting_change`, `mechanically_noisy_change`, or `ambiguous_boundary`\n- `changeTypeProfile`: `general_code_change`, `api_contract_change`, `data_model_or_migration`, `security_sensitive`, or `test_only`\n- `maxParallelism`: 0 / 3 / 5\n- `criticalSurfaceTouched`: true / false\n- `needsSimulation`: true / false\n- `needsBoundaryFollowup`: true / false\n- `needsContextFollowup`: true / false\n- `needsReviewerBundle`: true / false\n\nDecision guidance:\n- QUICK: very small, isolated, low-risk changes with little ambiguity\n- STANDARD: typical feature or bug-fix reviews with moderate ambiguity or moderate risk\n- THOROUGH: critical surfaces, architectural novelty, high risk, broad change sets, or strong need for independent reviewer perspectives\n\nRouting guidance:\n- `api_contract_change` -> bias toward contract/consumer/backward-compatibility scrutiny\n- `data_model_or_migration` -> bias toward rollout/compatibility/simulation scrutiny\n- `security_sensitive` -> bias toward adversarial/runtime-risk scrutiny, lower tolerance for weak evidence\n- `test_only` -> bias toward stronger false-positive suppression\n- `mechanically_noisy_change` -> bias toward stronger noise filtering\n\n**Step 6 -- Caller enumeration (transitive impact discovery):**\nThis step discovers regressions that diff-anchoring alone cannot catch.\n\nFor each changed function, method, or exported symbol in the diff:\n1. Extract the name from the changed lines\n2. Run `git grep -n \"<name>\"` (or ripgrep) across the repository, excluding the changed files themselves\n3. Collect results: unchanged files that call, import, or reference the changed symbol\n4. For each caller found, note: file path, line number, and how it uses the symbol\n5. Assess whether the change's contract (signature, return type, behavior) could affect each caller\n\nSet:\n- `callerEnumerationResults`: array of `{ changedSymbol, callers: [{ file, line, usage }], contractChangeRisk: 'high'|'medium'|'low'|'none' }`\n- `callerEnumerationCount`: total number of external callers found\n- `callerEnumerationHighRiskCount`: callers where contractChangeRisk is 'high'\n- `callerEnumerationConfidence`: High / Medium / Low\n\nFallback: if grep/ripgrep is unavailable or the codebase is too large to enumerate, set `callerEnumerationConfidence: Low` and record the limitation. Do not block the review.\n\nHigh-risk callers feed directly into the `correctness_invariants` reviewer family in Phase 3.\n\n**Step 7 -- Optional deeper context:**\nIf `reviewMode` is STANDARD or THOROUGH and context remains incomplete, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\n**Step 8 -- Human-facing artifact:**\nChoose `reviewDocPath` only if a live artifact will materially improve human readability. Default: `mr-review.md` at project root. Optional, never canonical workflow state.\n\nFallback behavior:\n- PR/MR not found but branch/diff is inspectable -> continue with downgraded context confidence\n- merge-base / ancestor ambiguous -> continue, set `needsBoundaryFollowup = true`, disclose\n- ticket or supporting docs missing -> continue with downgraded context confidence\n- only a patch/diff available -> continue if inspectable, lower confidence on intent-dependent conclusions\n- review target itself missing -> ask only for that missing artifact and stop\n\nSet these context keys:\n`reviewTargetKind`, `reviewTargetSource`, `prUrl`, `prNumber`, `baseCandidate`, `mergeBaseRef`, `boundaryConfidence`, `contextConfidence`, `mrTitle`, `mrPurpose`, `ticketRefs`, `ticketContext`, `supportingDocsFound`, `policySourcesFound`, `accessibleContextSources`, `missingContextSources`, `focusAreas`, `changedFileCount`, `criticalSurfaceTouched`, `reviewMode`, `riskLevel`, `shapeProfile`, `changeTypeProfile`, `maxParallelism`, `reviewDocPath`, `contextSummary`, `candidateFiles`, `moduleRoots`, `contextUnknownCount`, `coverageGapCount`, `authorIntentUnclear`, `needsSimulation`, `needsBoundaryFollowup`, `needsContextFollowup`, `needsReviewerBundle`, `coreReviewSurface`, `likelyNoiseOrMechanicalChurn`, `likelyInheritedOrOutOfScopeChanges`, `reviewSurfaceSummary`, `reviewScopeWarnings`, `openQuestions`, `callerEnumerationResults`, `callerEnumerationCount`, `callerEnumerationHighRiskCount`, `callerEnumerationConfidence`\n\nAlso set a one-sentence goal in context (e.g. 'review PR #47 before merge') to populate the session title.\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- classify AFTER exploring, not before\n- caller enumeration runs even for QUICK mode -- it is cheap and catches the most important regression class",
+      "prompt": "Build the review foundation in one pass, including transitive impact discovery.\n\n**Step 1 -- Early exit / minimum inputs:**\nBefore exploring, verify that the review target is real and inspectable. If the diff, changed files, or equivalent review material are completely absent and cannot be inferred with tools, ask for the minimum missing artifact and stop. Do NOT ask questions you can resolve with tools.\n\n**Step 2 -- Locate and bound the review target:**\nAttempt to determine the strongest available review target and boundary.\n\nAttempt to establish:\n- `reviewTargetKind` from the strongest available source (PR/MR, branch, patch, diff, or local working tree changes)\n- `reviewTargetSource` describing where the target came from\n- likely PR/MR identity when available (`prUrl`, `prNumber`)\n- likely base / ancestor reference (`baseCandidate`, `mergeBaseRef`) when available\n- whether the branch may include inherited or out-of-scope changes\n- `boundaryConfidence`: High / Medium / Low\n\nDo not over-prescribe your own investigation path. Use the strongest available evidence and record uncertainty honestly.\n\n**Step 3 -- Enrich with context:**\nRecover the strongest available intent and policy context.\n\nAttempt to recover:\n- MR title, purpose, and PR description\n- ticket / issue / acceptance context (`ticketRefs`, `ticketContext`)\n- supporting docs / specs / rollout context (`supportingDocsFound`)\n- repo or user policy/convention context (`policySourcesFound`) -- check AGENTS.md, CLAUDE.md, .workrail/review-rules.md, or equivalent\n- `contextConfidence`: High / Medium / Low\n\n**Step 4 -- Review-surface hygiene:**\nClassify the visible change into a minimal review surface.\n\nSet:\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n\n**Step 5 -- Classify the review:**\nAfter exploration, classify the work.\n\nSet:\n- `reviewMode`: QUICK / STANDARD / THOROUGH\n- `riskLevel`: Low / Medium / High\n- `shapeProfile`: `isolated_change`, `crosscutting_change`, `mechanically_noisy_change`, or `ambiguous_boundary`\n- `changeTypeProfile`: `general_code_change`, `api_contract_change`, `data_model_or_migration`, `security_sensitive`, or `test_only`\n- `maxParallelism`: 0 / 3 / 5\n- `criticalSurfaceTouched`: true / false\n- `needsSimulation`: true / false\n- `needsBoundaryFollowup`: true / false\n- `needsContextFollowup`: true / false\n- `needsReviewerBundle`: true / false\n\nDecision guidance:\n- QUICK: very small, isolated, low-risk changes with little ambiguity\n- STANDARD: typical feature or bug-fix reviews with moderate ambiguity or moderate risk\n- THOROUGH: critical surfaces, architectural novelty, high risk, broad change sets, or strong need for independent reviewer perspectives\n\nRouting guidance:\n- `api_contract_change` -> bias toward contract/consumer/backward-compatibility scrutiny\n- `data_model_or_migration` -> bias toward rollout/compatibility/simulation scrutiny\n- `security_sensitive` -> bias toward adversarial/runtime-risk scrutiny, lower tolerance for weak evidence\n- `test_only` -> bias toward stronger false-positive suppression\n- `mechanically_noisy_change` -> bias toward stronger noise filtering\n\n**Step 6 -- Caller enumeration (transitive impact discovery):**\nThis step discovers regressions that diff-anchoring alone cannot catch.\n\nFor each changed function, method, or exported symbol in the diff:\n1. Extract the name from the changed lines\n2. Run `git grep -n \"<name>\"` (or ripgrep) across the repository, excluding the changed files themselves\n3. Collect results: unchanged files that call, import, or reference the changed symbol\n4. For each caller found, note: file path, line number, and how it uses the symbol\n5. Assess whether the change's contract (signature, return type, behavior) could affect each caller\n\nSet:\n- `callerEnumerationResults`: array of `{ changedSymbol, callers: [{ file, line, usage }], contractChangeRisk: 'high'|'medium'|'low'|'none' }`\n- `callerEnumerationCount`: total number of external callers found\n- `callerEnumerationHighRiskCount`: callers where contractChangeRisk is 'high'\n- `callerEnumerationConfidence`: High / Medium / Low\n\nFallback: if grep/ripgrep is unavailable or the codebase is too large to enumerate, set `callerEnumerationConfidence: Low` and record the limitation. Do not block the review.\n\nHigh-risk callers feed directly into the `correctness_invariants` reviewer family in Phase 3.\n\n**Step 7 -- Optional deeper context:**\nIf `reviewMode` is STANDARD or THOROUGH and context remains incomplete, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with agentConfig={ modelTier: 'lightweight' }, focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\n**Step 8 -- Human-facing artifact:**\nChoose `reviewDocPath` only if a live artifact will materially improve human readability. Default: `mr-review.md` at project root. Optional, never canonical workflow state.\n\nFallback behavior:\n- PR/MR not found but branch/diff is inspectable -> continue with downgraded context confidence\n- merge-base / ancestor ambiguous -> continue, set `needsBoundaryFollowup = true`, disclose\n- ticket or supporting docs missing -> continue with downgraded context confidence\n- only a patch/diff available -> continue if inspectable, lower confidence on intent-dependent conclusions\n- review target itself missing -> ask only for that missing artifact and stop\n\nSet these context keys:\n`reviewTargetKind`, `reviewTargetSource`, `prUrl`, `prNumber`, `baseCandidate`, `mergeBaseRef`, `boundaryConfidence`, `contextConfidence`, `mrTitle`, `mrPurpose`, `ticketRefs`, `ticketContext`, `supportingDocsFound`, `policySourcesFound`, `accessibleContextSources`, `missingContextSources`, `focusAreas`, `changedFileCount`, `criticalSurfaceTouched`, `reviewMode`, `riskLevel`, `shapeProfile`, `changeTypeProfile`, `maxParallelism`, `reviewDocPath`, `contextSummary`, `candidateFiles`, `moduleRoots`, `contextUnknownCount`, `coverageGapCount`, `authorIntentUnclear`, `needsSimulation`, `needsBoundaryFollowup`, `needsContextFollowup`, `needsReviewerBundle`, `coreReviewSurface`, `likelyNoiseOrMechanicalChurn`, `likelyInheritedOrOutOfScopeChanges`, `reviewSurfaceSummary`, `reviewScopeWarnings`, `openQuestions`, `callerEnumerationResults`, `callerEnumerationCount`, `callerEnumerationHighRiskCount`, `callerEnumerationConfidence`\n\nAlso set a one-sentence goal in context (e.g. 'review PR #47 before merge') to populate the session title.\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- classify AFTER exploring, not before\n- caller enumeration runs even for QUICK mode -- it is cheap and catches the most important regression class",
       "requireConfirmation": {
         "or": [
-          { "var": "reviewMode", "equals": "THOROUGH" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "reviewMode",
+            "equals": "THOROUGH"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -120,19 +138,25 @@
       "promptBlocks": {
         "goal": "Freeze a shared factual basis for review and decide how much reviewer-family parallelism is warranted.",
         "constraints": [
-          [{ "kind": "ref", "refId": "wr.refs.notes_first_durability" }],
+          [
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
+          ],
           "The fact packet is the primary truth for downstream reviewer families.",
           "Keep `recommendationHypothesis` as a secondary hypothesis to challenge, not a frame to defend.",
           "Include the full bodies of changed functions with [NEW]/[UNCHANGED] line markers when the PR is not large (fewer than 10 changed functions). For larger PRs, include at minimum the function signature and the changed hunk with 8 lines of context before the change and 2 lines after."
         ],
         "procedure": [
           "Create a neutral `reviewFactPacket` containing: MR purpose and expected behavior change, intent alignment status and any misalignment finding, review target and review-surface summary, changed files and module roots, key contracts / invariants / affected consumers, call-chain highlights, **caller enumeration results** (callerEnumerationResults -- list all high-risk callers explicitly), relevant repo patterns from AGENTS.md/CLAUDE.md/.workrail/review-rules.md, tests/docs expectations, discovered ticket/doc/policy context, accessible and missing context sources, explicit open unknowns, relevant coding philosophy principles (scope to the 3-5 most relevant for what was changed), existing patterns in the changed module, the acceptance criteria list and scope check results from Phase 0b.",
-          "Initialize `coverageLedger` for these domains: `correctness_logic`, `contracts_invariants`, `patterns_architecture`, `philosophy_alignment`, `runtime_production_risk`, `tests_docs_rollout`, `security_performance`, `intent_alignment`, `transitive_impact`.",
+          "Initialize `coverageLedger` for these domains: `correctness_logic`, `contracts_invariants`, `patterns_architecture`, `philosophy_alignment`, `runtime_production_risk`, `tests_docs_rollout`, `security_performance`, `intent_alignment`, `transitive_impact`, `ticket_domain_fit`.",
           "Perform a preliminary self-review from the fact packet before choosing reviewer families.",
-          "Reviewer family options: `correctness_invariants`, `patterns_architecture`, `philosophy_alignment`, `runtime_production_risk`, `test_docs_rollout`, `security`, `ticket_compliance`, `false_positive_skeptic`, `missed_issue_hunter`.",
+          "Reviewer family options: `correctness_invariants`, `patterns_architecture`, `philosophy_alignment`, `runtime_production_risk`, `test_docs_rollout`, `security`, `ticket_compliance`, `ticket_domain_fit`, `false_positive_skeptic`, `missed_issue_hunter`, `prior_review_signals`, `visibility_scope`.",
           "Selection guidance: QUICK = no bundle by default unless ambiguity feels material; STANDARD = 3 families by default; THOROUGH = 5 families by default.",
-          "Always include `correctness_invariants`. Include `test_docs_rollout` in STANDARD and THOROUGH unless clearly not applicable. Include `runtime_production_risk` when `criticalSurfaceTouched = true` or `needsSimulation = true`. Include `security` when `changeTypeProfile = security_sensitive` or when the diff touches auth, session, crypto, permissions, or input handling. Include `ticket_compliance` when `acceptanceCriteriaSource != 'none'` and `missingCriteriaCount > 0` or `scopeCreepCount > 0`. Include `missed_issue_hunter` in THOROUGH. Include `false_positive_skeptic` when Major/Critical findings seem plausible or severity inflation risk is non-trivial. Include `philosophy_alignment` in STANDARD and THOROUGH when the change introduces new abstractions, modifies core patterns, or when `scopeCreepCount > 0` or `missingCriteriaCount > 0`.",
+          "Always include `correctness_invariants`. Include `test_docs_rollout` in STANDARD and THOROUGH unless clearly not applicable. Include `runtime_production_risk` when `criticalSurfaceTouched = true` or `needsSimulation = true`. Include `security` when `changeTypeProfile = security_sensitive` or when the diff touches auth, session, crypto, permissions, or input handling. Include `ticket_compliance` when `acceptanceCriteriaSource != 'none'` and `missingCriteriaCount > 0` or `scopeCreepCount > 0`. Include `ticket_domain_fit` in QUICK, STANDARD, and THOROUGH whenever real ticket context was recovered (`ticketRefs` or `ticketContext` non-empty) and `changeTypeProfile != 'test_only'` -- this is a cheap, text-level cross-check (does the ticket's own stated product area/domain match what the touched code is actually named/documented for), not a deep investigation, so unlike `runtime_production_risk`/`security` it should not be gated behind risk level: a mismatch is exactly as likely to hide in a small, clean-looking diff as a large risky one, and the other families have no mandate to catch it (`ticket_compliance` checks whether acceptance criteria were met, never whether the ticket's domain matches the subsystem touched; `philosophy_alignment`/`correctness_invariants` never read the ticket's own domain language against the code's). Include `missed_issue_hunter` in THOROUGH. Include `false_positive_skeptic` when Major/Critical findings seem plausible or severity inflation risk is non-trivial. Include `philosophy_alignment` in STANDARD and THOROUGH when the change introduces new abstractions, modifies core patterns, or when `scopeCreepCount > 0` or `missingCriteriaCount > 0`. Include `prior_review_signals` when STANDARD or THOROUGH and the PR touches files that have prior review history (most non-trivial PRs qualify); it adds the historical signal the current-diff angles cannot see. Include `visibility_scope` in STANDARD and THOROUGH unconditionally, and in QUICK when `changeTypeProfile = api_contract_change` or when the diff contains any visibility widening (private -> protected, internal -> exported, etc.); it checks whether existing module boundaries are enforced by visibility modifiers, a gap no other family has a mandate to fill.",
           "Set `coverageUncertainCount` as the number of coverage domains not yet safely closed.",
+          "Set `selectedReviewerFamilies` in the context as an array of strings representing the selected reviewer families to run (e.g. `[\"correctness_invariants\", \"security\"]`). Options: `correctness_invariants`, `patterns_architecture`, `runtime_production_risk`, `security`, `test_docs_rollout`, `philosophy_alignment`, `false_positive_skeptic`, `ticket_compliance`, `ticket_domain_fit`, `missed_issue_hunter`, `prior_review_signals`, `visibility_scope`.",
           "Initialize `contradictionCount`, `blindSpotCount`, and `falsePositiveRiskCount` to `0` if no reviewer-family bundle will run."
         ],
         "verify": [
@@ -146,43 +170,227 @@
     {
       "id": "phase-3-reviewer-family-bundle",
       "title": "Phase 3: Parallel Reviewer Family Bundle",
-      "runCondition": { "var": "needsReviewerBundle", "equals": true },
-      "promptBlocks": {
-        "goal": "Run the selected reviewer families in parallel from the same fact packet, then synthesize their output as evidence rather than conclusions.",
-        "constraints": [
-          [{ "kind": "ref", "refId": "wr.refs.notes_first_durability" }],
-          [{ "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }],
-          "Each reviewer family must use `reviewFactPacket` as primary truth.",
-          "Use `recommendationHypothesis` only as secondary comparison context.",
-          "Reviewer-family outputs are raw evidence, not canonical review state.",
-          "FINDING CONTRACT (applies to every family): a finding is only valid if the executor can state all of: (1) the specific file and line, (2) the affected code path or trust boundary, (3) the concrete failure mode or risk, (4) why this PR introduced or worsened it -- not just that the issue exists, (5) the smallest credible remediation or verification step. A finding missing any of these must be converted to a clarification question instead.",
-          "FINDING CAP (applies to every family): QUICK/STANDARD = max 3 findings; THOROUGH = max 5. Rank by severity x confidence x actionability. Extras are noise -- drop them.",
-          "CLARIFICATION PATHWAY (applies to every family): when context is insufficient to make a confident finding, emit 'Clarification needed: [specific question]' instead of a low-confidence finding."
-        ],
-        "procedure": [
-          "Before delegating, restate the current `recommendationHypothesis` and say which reviewer family is most likely to challenge it.",
-          "Family missions and checklists:\n\n`correctness_invariants` -- logic errors, invariant violations, API contract breaks, transitive caller impact.\nCHECKLIST: (1) Does the changed logic handle all branches including error paths and edge cases? (2) Do the callerEnumerationResults show any caller whose contract assumptions are now violated? (3) Are all invariants that callers depend on still upheld? (4) Are there null/undefined/empty cases the change doesn't handle? (5) Does the change break any existing tests or cause them to test the wrong thing?\n\n`patterns_architecture` -- pattern fit, design consistency, architectural concerns, scope creep.\nCHECKLIST: (1) Does the change belong in the layer/module where it was placed? (2) Does it introduce unnecessary complexity or duplicate existing solutions? (3) Does it respect the module's existing abstractions without adding leaky ones? (4) Is scope creep present -- changes beyond what the ticket requires? (5) Would a future maintainer understand why this was placed here?\n\n`runtime_production_risk` -- runtime behavior, production impact, performance, state-flow, rollout safety.\nCHECKLIST: (1) Are there performance implications (N+1, blocking calls, memory retention)? (2) Is the change safe under concurrent access? (3) Does it affect rollout safety (feature flags, migrations, backward compatibility)? (4) Are error cases handled in a way that degrades gracefully? (5) Is the change observable -- are there logs/metrics to detect if it breaks in production?\n\n`security` -- adversarial analysis: trust boundaries, attacker-controlled inputs, privilege escalation, injection risks.\nCHECKLIST: (1) What inputs in the changed code path are attacker-controlled? Trace each. (2) Does the change cross a trust boundary -- does it pass attacker-controlled data to a privileged operation? (3) Are there injection risks (SQL, command, path traversal, template)? (4) Does the change affect auth, session handling, permissions, or crypto? If yes, what could an attacker do with the change? (5) Are secrets, tokens, or credentials handled correctly?\nNOTE: approach this as an attacker, not a code auditor. Start by identifying what an attacker controls, then ask how the change could be exploited.\n\n`test_docs_rollout` -- test adequacy, documentation, migration, rollout, affected consumers.\nCHECKLIST: (1) Do the new/changed tests actually exercise the new behavior, or do they test implementation details? (2) Are error paths and edge cases tested? (3) Is the public API or behavior change documented? (4) If there is a migration or schema change, is the rollout sequence safe? (5) Are downstream consumers or dependents identified and accounted for?\n\n`philosophy_alignment` -- implementation approach vs. coding philosophy, alternative approaches.\nCHECKLIST: (1) For each relevant principle from the fact packet, does the implementation follow it, violate it, or is neutral? Name violations by principle and cite specific code. (2) Generate 2-3 alternative approaches that would also satisfy the acceptance criteria -- for each, state what it looks like in one sentence, which philosophy principles it scores better/worse on, and why it was or was not the right choice here. (3) Is the chosen approach the best one given the philosophy, or merely a correct one? (4) Are there abstractions that would make illegal states unrepresentable that the author missed? (5) Does the change handle errors as data (Result types) rather than exceptions?\n\n`false_positive_skeptic` -- challenge overreaches, weak evidence, severity inflation.\nMISSION: find the strongest case that other families are wrong. For each Major or Critical finding from other families: (1) Is the evidence strong enough to justify the severity? (2) Could this issue have pre-existed before this PR? (3) Is the affected code path actually reachable? (4) Does the suggested fix actually address the root cause? (5) Is the reviewer demonstrating codebase knowledge or pattern-matching on surface appearance?\n\n`ticket_compliance` -- verify the PR delivers what the ticket required.\nCHECKLIST: (1) For each acceptance criterion from `acceptanceCriteria` with status `missing` or `partial`, confirm whether it is truly absent from the diff or whether Phase 0b assessment was wrong. (2) For each `scopeCreepFlag`, assess severity: is this a necessary implementation detail or genuine unasked-for scope? (3) Does the PR description accurately describe what the diff does? (4) Are there acceptance criteria that are `met` on paper but implemented in a way that misses the spirit of the requirement? (5) Would the ticket author consider this PR done?\n\n`missed_issue_hunter` -- search for an important issue category the other families may have missed.\nMISSION: identify one class of issue the other families are structurally blind to. Consider: (1) Cross-cutting concerns that span multiple changed files (2) Second-order effects of caller contract changes not yet enumerated (3) Security concerns outside the explicit security domain (timing attacks, resource exhaustion, SSRF) (4) Operational concerns (config drift, deployment dependencies, secret rotation) (5) Long-term maintainability issues the current reviewers didn't flag",
-          "Mode-adaptive parallelism: STANDARD = spawn THREE WorkRail Executors SIMULTANEOUSLY for the selected families; THOROUGH = spawn FIVE WorkRail Executors SIMULTANEOUSLY for the selected families.",
-          "After receiving outputs, explicitly synthesize: what reviewer families confirmed, what was genuinely new, what appeared weak or overreached, and what changed your mind or did not.",
-          "Set these context keys: `familyFindingsSummary`, `familyRecommendationSpread`, `contradictionCount`, `blindSpotCount`, `falsePositiveRiskCount`, `needsSimulation`, `rawFamilyFindings` (all findings before reflection scoring, for Phase 3b).",
-          "Compute `contradictionCount` as material disagreements across families about issue validity, severity, or recommendation.",
-          "Increase `blindSpotCount` if the missed-issue hunter or any family identifies uncovered review space.",
-          "Increase `falsePositiveRiskCount` when the skeptic materially weakens one or more high-severity findings."
-        ],
-        "verify": [
-          "The same fact packet was used as primary truth across reviewer families.",
-          "Caller enumeration results were explicitly given to the correctness_invariants family.",
-          "Reviewer-family output is not treated as self-finalizing.",
-          "Contradictions, blind spots, and false-positive risks are reflected structurally in context."
-        ]
+      "type": "parallel",
+      "runCondition": {
+        "var": "needsReviewerBundle",
+        "equals": true
       },
+      "parallelDelegations": [
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "correctness_invariants"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "correctness_invariants",
+            "familyMission": "logic errors, invariant violations, API contract breaks, transitive caller impact.",
+            "familyChecklist": "(1) Does the changed logic handle all branches including error paths and edge cases? (2) Do the callerEnumerationResults show any caller whose contract assumptions are now violated? (3) Are all invariants that callers depend on still upheld? (4) Are there null/undefined/empty cases the change doesn't handle? (5) Does the change break any existing tests or cause them to test the wrong thing?",
+            "deliverableName": "docs/design/reviewer-findings-correctness-invariants.md"
+          },
+          "modelTier": "mid"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "patterns_architecture"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "patterns_architecture",
+            "familyMission": "pattern fit, design consistency, architectural concerns, scope creep.",
+            "familyChecklist": "(1) Does the change belong in the layer/module where it was placed? (2) Does it introduce unnecessary complexity or duplicate existing solutions? (3) Does it respect the module's existing abstractions without adding leaky ones? (4) Is scope creep present -- changes beyond what the ticket requires? (5) Would a future maintainer understand why this was placed here? (6) Before raising a cross-team ownership or sign-off concern (the change touches a module/path owned by a team other than the author's own, per CODEOWNERS or an equivalent ownership doc) as an open question to a human reviewer, verify it mechanically first: check the real approval rules for the MR/PR (e.g. `glab api projects/:id/merge_requests/:iid/approval_rules`, the GitHub required-reviewers API, or the platform equivalent) to see whether that team's sign-off is ALREADY a required, structurally-enforced rule on the touched path. If it is, do not ask the author whether that team needs to sign off -- either state it as a confirmed, already-covered fact if worth mentioning, or omit it entirely; never pose an already-mechanically-answerable fact as a question. Only raise cross-team ownership as a genuine open question when the check shows the relevant team's sign-off is NOT already required.",
+            "deliverableName": "docs/design/reviewer-findings-patterns-architecture.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "runtime_production_risk"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "runtime_production_risk",
+            "familyMission": "runtime behavior, production impact, performance, state-flow, rollout safety.",
+            "familyChecklist": "(1) Are there performance implications (N+1, blocking calls, memory retention)? (2) Is the change safe under concurrent access? (3) Does it affect rollout safety (feature flags, migrations, backward compatibility)? (4) Are error cases handled in a way that degrades gracefully? (5) Is the change observable -- are there logs/metrics to detect if it breaks in production?",
+            "deliverableName": "docs/design/reviewer-findings-runtime-production-risk.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "security"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "security",
+            "familyMission": "adversarial analysis: trust boundaries, attacker-controlled inputs, privilege escalation, injection risks.",
+            "familyChecklist": "(1) What inputs in the changed code path are attacker-controlled? Trace each. (2) Does the change cross a trust boundary -- does it pass attacker-controlled data to a privileged operation? (3) Are there injection risks (SQL, command, path traversal, template)? (4) Does the change affect auth, session handling, permissions, or crypto? If yes, what could an attacker do with the change? (5) Are secrets, tokens, or credentials handled correctly?\nNOTE: approach this as an attacker, not a code auditor. Start by identifying what an attacker controls, then ask how the change could be exploited.",
+            "deliverableName": "docs/design/reviewer-findings-security.md"
+          },
+          "modelTier": "mid"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "test_docs_rollout"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "test_docs_rollout",
+            "familyMission": "test adequacy, documentation, migration, rollout, affected consumers.",
+            "familyChecklist": "(1) Do the new/changed tests actually exercise the new behavior, or do they test implementation details? (2) Are error paths and edge cases tested? (3) Is the public API or behavior change documented? (4) If there is a migration or schema change, is the rollout sequence safe? (5) Are downstream consumers or dependents identified and accounted for?",
+            "deliverableName": "docs/design/reviewer-findings-test-docs-rollout.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "philosophy_alignment"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "philosophy_alignment",
+            "familyMission": "implementation approach vs. coding philosophy, alternative approaches.",
+            "familyChecklist": "(1) For each relevant principle from the fact packet, does the implementation follow it, violate it, or is neutral? Name violations by principle and cite specific code. (2) Generate 2-3 alternative approaches that would also satisfy the acceptance criteria -- for each, state what it looks like in one sentence, which philosophy principles it scores better/worse on, and why it was or was not the right choice here. (3) Is the chosen approach the best one given the philosophy, or merely a correct one? (4) Are there abstractions that would make illegal states unrepresentable that the author missed? (5) Does the change handle errors as data (Result types) rather than exceptions?",
+            "deliverableName": "docs/design/reviewer-findings-philosophy-alignment.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "false_positive_skeptic"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "false_positive_skeptic",
+            "familyMission": "challenge overreaches, weak evidence, severity inflation.",
+            "familyChecklist": "find the strongest case that other families are wrong. For each Major or Critical finding from other families: (1) Is the evidence strong enough to justify the severity? (2) Could this issue have pre-existed before this PR? (3) Is the affected code path actually reachable? (4) Does the suggested fix actually address the root cause? (5) Is the reviewer demonstrating codebase knowledge or pattern-matching on surface appearance.",
+            "deliverableName": "docs/design/reviewer-findings-false-positive-skeptic.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "ticket_compliance"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "ticket_compliance",
+            "familyMission": "verify the PR delivers what the ticket required.",
+            "familyChecklist": "(1) For each acceptance criterion from `acceptanceCriteria` with status `missing` or `partial`, confirm whether it is truly absent from the diff or whether Phase 0b assessment was wrong. (2) For each `scopeCreepFlag`, assess severity: is this a necessary implementation detail or genuine unasked-for scope? (3) Does the PR description accurately describe what the diff does? (4) Are there acceptance criteria that are `met` on paper but implemented in a way that misses the spirit of the requirement? (5) Would the ticket author consider this PR done?",
+            "deliverableName": "docs/design/reviewer-findings-ticket-compliance.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "ticket_domain_fit"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "ticket_domain_fit",
+            "familyMission": "reconcile the ticket's own stated product area/domain against what the touched code is actually named and documented for -- a cross-check no other family has a mandate to make.",
+            "familyChecklist": "(1) Read the ticket/ticketContext's OWN text (not just its title or team field) -- what product area, user-facing feature, or domain scenario does it actually describe? (2) Read the touched code's own domain signals -- class/package names, KDoc/comments, existing domain terms already present in the file(s) -- what subsystem or domain do THEY say this code belongs to? (3) Do the two match? If the ticket describes one domain and the touched code is named or documented for a visibly different one, this is a finding regardless of how clean or small the diff itself looks. (4) Do NOT resolve an apparent mismatch by trusting the author's own inline comment, commit message, or PR description as settling it -- an author's own claim about why cross-domain code is the right place is exactly the kind of claim this check exists to verify independently, never accept at face value. (5) If the ticket itself is not in a resolved/confirmed state (e.g. blocked, pending a product decision, open questions in its own comments/description), do not describe any technical claim as 'confirmed via ticket' -- state plainly that the ticket does not actually confirm it. (6) Conclude explicitly: either 'domain matches, no concern' with one line of reasoning citing what you compared, or a concrete, specific question a human with real product/domain context should answer before this merges -- never stay silent on a real mismatch just because the code change itself is small or mechanically correct.",
+            "deliverableName": "docs/design/reviewer-findings-ticket-domain-fit.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "missed_issue_hunter"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "missed_issue_hunter",
+            "familyMission": "identify one class of issue the other families are structurally blind to.",
+            "familyChecklist": "identify one class of issue the other families are structurally blind to. Consider: (1) Cross-cutting concerns that span multiple changed files (2) Second-order effects of caller contract changes not yet enumerated (3) Security concerns outside the explicit security domain (timing attacks, resource exhaustion, SSRF) (4) Operational concerns (config drift, deployment dependencies, secret rotation) (5) Long-term maintainability issues the current reviewers didn't flag",
+            "deliverableName": "docs/design/reviewer-findings-missed-issue-hunter.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "prior_review_signals"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "prior_review_signals",
+            "familyMission": "surfaces patterns from review history on the same files to catch recurring issues and apply prior reviewer judgment.",
+            "familyChecklist": "(1) Find merged MRs/PRs that touched any of the same files changed in this PR. For GitHub repos use: `gh pr list --state merged --json number,title,files` then `gh pr view <number> --json reviews,comments,reviewThreads` for the top 3-5 most recent. For GitLab repos use the available MCP tools. If neither is accessible, note the gap and skip. (2) Identify any review comments on those prior MRs that flagged issues in the same functions or code paths changed by this PR. (3) For each prior finding: does this PR re-introduce the same pattern, or fail to carry forward the fix that was applied previously? (4) Are there recurring comments (same reviewer flagged the same thing in 2+ prior MRs) that now apply to this PR? These carry extra weight. (5) Did any prior MR introduce a pattern this PR departs from without explanation?",
+            "deliverableName": "docs/design/reviewer-findings-prior-review-signals.md"
+          },
+          "modelTier": "lightweight"
+        },
+        {
+          "workflowId": "wr.routine-reviewer-family",
+          "runCondition": {
+            "var": "selectedReviewerFamilies",
+            "contains": "visibility_scope"
+          },
+          "contextMapping": {
+            "reviewFactPacket": "reviewFactPacket"
+          },
+          "args": {
+            "familyName": "visibility_scope",
+            "familyMission": "encapsulation enforcement -- given the module boundaries and abstractions that exist, symbols, types, and members carry the narrowest visibility their actual usage permits; visibility widenings introduced by the PR are justified by architecture, not convenience.",
+            "familyChecklist": "(1) Are any symbols (functions, classes, types, constants) exported by this PR that are only referenced within the same module? If yes, they should not be exported. (2) Are any class or object members marked public or protected where private or package-internal would suffice given actual usage in the diff? (3) Does any barrel or index file introduced or modified by this PR re-export internal implementation details that callers outside the module have no legitimate reason to reference? (4) Do any public function signatures expose concrete implementation types (classes, internal unions, internal enums) where a narrower public interface or type alias would be sufficient? (5) Does the PR widen any existing visibility modifier (private -> protected, internal -> exported, etc.)? If yes: is the widening the minimal correct fix, or does it paper over a structural problem -- a new caller that should have been placed inside the module, a missing public method, or a missing seam (interface, event, callback) that would have preserved encapsulation? NOTE -- mandate boundary: this family checks whether existing module boundaries and abstractions are enforced by visibility modifiers, not whether those boundaries are in the right place. If a seam itself appears misdesigned, flag it for patterns_architecture, not here. Start from the module's evident intent, then ask whether the modifiers honour it.",
+            "deliverableName": "docs/design/reviewer-findings-visibility-scope.md"
+          },
+          "modelTier": "mid"
+        }
+      ],
       "requireConfirmation": false
     },
     {
       "id": "phase-3b-hidden-reflection-scoring",
       "title": "Phase 3b: Hidden Reflection Scoring",
-      "runCondition": { "var": "needsReviewerBundle", "equals": true },
-      "prompt": "Score and filter the raw reviewer-family findings before synthesis. This pass is internal only -- scores and suppression rationale are never shown to reviewers or included in the final output.\n\nFor each finding in `rawFamilyFindings`:\n\n1. Score it 0-10 on confidence x actionability:\n   - Confidence (0-5): How certain are you that the issue is real and caused by this PR? 0 = speculation, 5 = directly observed in changed lines with clear causal path.\n   - Actionability (0-5): How clearly does the finding tell the reviewer what to do? 0 = vague flag, 5 = specific file+line+remediation step.\n   - Score = Confidence + Actionability (max 10)\n\n2. Apply the finding contract check:\n   - Does it have a specific file and line? If not, -3.\n   - Does it articulate why this PR introduced or worsened the issue? If not, -3.\n   - Does it have a concrete remediation step? If not, -2.\n\n3. Keep findings scoring 5 or above. Convert findings scoring 3-4 to clarification questions. Suppress findings scoring 0-2.\n\n4. For Critical findings: the threshold is 4 (lower bar -- don't suppress potential critical issues).\n\nSet these context keys:\n- `scoredFindings`: array of `{ finding, score, disposition: 'keep'|'clarify'|'suppress' }`\n- `reflectionScoredFindingsCount`: total findings scored\n- `filteredFindingsCount`: findings suppressed (score < 5 for non-critical, score < 4 for critical)\n- `clarificationQuestionsCount`: findings converted to clarification questions\n- `postReflectionCriticalCount`: critical findings remaining after scoring\n- `postReflectionMajorCount`: major findings remaining after scoring\n\nRules:\n- never include scores, thresholds, or suppression rationale in any reviewer-facing output\n- the purpose of this step is to improve signal-to-noise, not to reduce finding count for its own sake\n- a finding that fails the contract check but is clearly important should be rewritten to satisfy the contract rather than suppressed",
+      "runCondition": {
+        "var": "needsReviewerBundle",
+        "equals": true
+      },
+      "prompt": "Score and filter the raw reviewer-family findings before synthesis. This pass is internal only -- scores and suppression rationale are never shown to reviewers or included in the final output.\n\nFirst, read the findings from all files generated by the active parallel reviewer families under `docs/design/reviewer-findings-*.md` and compile them into a unified list of raw findings in your context under the key `rawFamilyFindings`.\n\nThen, for each finding in `rawFamilyFindings`:\n\n1. Score it 0-10 on confidence x actionability:\n   - Confidence (0-5): How certain are you that the issue is real and caused by this PR? 0 = speculation, 5 = directly observed in changed lines with clear causal path.\n   - Actionability (0-5): How clearly does the finding tell the reviewer what to do? 0 = vague flag, 5 = specific file+line+remediation step.\n   - Score = Confidence + Actionability (max 10)\n\n2. Apply the finding contract check:\n   - Does it have a specific file and line? If not, -3.\n   - Does it articulate why this PR introduced or worsened the issue? If not, -3.\n   - Does it have a concrete remediation step? If not, -2.\n\n3. Keep findings scoring 5 or above. Convert findings scoring 3-4 to clarification questions. Suppress findings scoring 0-2.\n\n4. For Critical findings: the threshold is 4 (lower bar -- don't suppress potential critical issues).\n\nSet these context keys:\n- `scoredFindings`: array of `{ finding, score, disposition: 'keep'|'clarify'|'suppress' }`\n- `reflectionScoredFindingsCount`: total findings scored\n- `filteredFindingsCount`: findings suppressed (score < 5 for non-critical, score < 4 for critical)\n- `clarificationQuestionsCount`: findings converted to clarification questions\n- `postReflectionCriticalCount`: critical findings remaining after scoring\n- `postReflectionMajorCount`: major findings remaining after scoring\n\nRules:\n- never include scores, thresholds, or suppression rationale in any reviewer-facing output\n- the purpose of this step is to improve signal-to-noise, not to reduce finding count for its own sake\n- a finding that fails the contract check but is clearly important should be rewritten to satisfy the contract rather than suppressed",
       "requireConfirmation": false
     },
     {
@@ -205,7 +413,12 @@
           "promptBlocks": {
             "goal": "If contradictions, blind spots, or important coverage gaps remain, run only the smallest targeted follow-up needed.",
             "constraints": [
-              [{ "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }],
+              [
+                {
+                  "kind": "ref",
+                  "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+                }
+              ],
               "Prefer one compact targeted bundle over repeated broad delegation moments.",
               "Do not regather broad context unless a contradiction proves the original fact packet is insufficient.",
               "Targeted follow-up output is evidence only and must still be synthesized by the main agent."
@@ -249,8 +462,18 @@
       "promptBlocks": {
         "goal": "Stress-test the current recommendation before final handoff.",
         "constraints": [
-          [{ "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }],
-          [{ "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }],
+          [
+            {
+              "kind": "ref",
+              "refId": "wr.refs.adversarial_challenge_rules"
+            }
+          ],
+          [
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
+          ],
           "Validation output is evidence to synthesize, not an automatic reopen signal."
         ],
         "procedure": [
@@ -276,7 +499,9 @@
       ],
       "assessmentConsequences": [
         {
-          "when": { "anyEqualsLevel": "low" },
+          "when": {
+            "anyEqualsLevel": "low"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "evidence_quality low: anchor each finding to a specific file/line; remove findings without concrete grounding. coverage_completeness low: investigate uncovered domains or acknowledge gaps in the ledger. contradiction_resolution low: resolve each contradiction or state your position with rationale. finding_schema_compliance low: for every Critical/Major finding, add file+line, causal link to PR changes, and a concrete remediation step."
@@ -285,19 +510,33 @@
       ],
       "requireConfirmation": {
         "or": [
-          { "var": "validatorConsensusLevel", "equals": "Low" },
-          { "var": "recommendationConfidenceBand", "equals": "Low" }
+          {
+            "var": "validatorConsensusLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "recommendationConfidenceBand",
+            "equals": "Low"
+          }
         ]
       }
     },
     {
       "id": "phase-6-final-handoff",
       "title": "Phase 6: Final Handoff",
-      "prompt": "Provide the final MR review handoff.\n\nInclude:\n- MR title and purpose\n- intent alignment status and any misalignment finding\n- review mode used\n- final recommendation and confidence band\n- confidence assessment summary, including the most important reason confidence was capped if it was not High\n- counts of Critical / Major / Minor / Nit findings (post-reflection)\n- top findings with rationale -- each must include file, line, causal link to PR changes, and remediation step\n- caller enumeration summary: how many external callers were found, how many were high-risk, and what was assessed\n- strongest remaining areas of uncertainty, if any\n- summary of the coverage ledger, especially any still-uncertain domains\n- ready-to-post MR comments summary\n- any validation outcomes a human reviewer should see\n- review environment status: sources used, sources missing, boundary and context confidence, how limits affected the review\n- path to the full human-facing review artifact (`reviewDocPath`) only if one was created\n\nRules:\n- the final recommendation assists a human reviewer; it does not replace them\n- if `reviewDocPath` exists, treat it as a human-facing companion artifact only\n- be explicit when missing PR/ticket/doc/boundary context limited confidence\n- do not post comments, approve, reject, or merge unless the user explicitly asks\n- if reflection scoring suppressed findings, do NOT mention the count or rationale -- only present the final kept findings\n\nIMPORTANT: Emit a structured verdict via complete_step's artifacts[] parameter. Required fields on the outer object; enrichment fields are optional on each finding:\n{\n  \"kind\": \"wr.review_verdict\",\n  \"verdict\": \"clean\" | \"minor\" | \"blocking\",\n  \"confidence\": \"high\" | \"medium\" | \"low\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\" | \"major\" | \"minor\" | \"nit\",\n      \"summary\": \"one-line description\",\n      \"findingCategory\": \"correctness\" | \"security\" | \"architecture\" | \"ux\" | \"performance\" | \"testing\" | \"style\",\n      \"file\": \"path/to/file.ts\",\n      \"startLine\": 42,\n      \"endLine\": 47,\n      \"causalLink\": \"one sentence: why this PR introduced or worsened this issue\",\n      \"remediation\": \"one sentence: the smallest credible fix or verification step\"\n    }\n  ],\n  \"summary\": \"one-line overall verdict summary\"\n}\nFor a clean review: findings: []. verdict: clean = no blocking issues, minor = small issues only, blocking = critical or major issues found. file/startLine/endLine/causalLink/remediation are optional enrichment fields -- include them for Critical and Major findings. omit endLine if single-line.",
+      "prompt": "Provide the final MR review handoff.\n\nInclude:\n- MR title and purpose\n- intent alignment status and any misalignment finding\n- review mode used\n- final recommendation and confidence band\n- confidence assessment summary, including the most important reason confidence was capped if it was not High\n- counts of Critical / Major / Minor / Nit findings (post-reflection)\n- top findings with rationale -- each must include file, line, causal link to PR changes, and remediation step\n- caller enumeration summary: how many external callers were found, how many were high-risk, and what was assessed\n- strongest remaining areas of uncertainty, if any\n- summary of the coverage ledger, especially any still-uncertain domains\n- ready-to-post MR comments summary\n- any validation outcomes a human reviewer should see\n- review environment status: sources used, sources missing, boundary and context confidence, how limits affected the review\n- path to the full human-facing review artifact (`reviewDocPath`) only if one was created\n\nRules:\n- the final recommendation assists a human reviewer; it does not replace them\n- if `reviewDocPath` exists, treat it as a human-facing companion artifact only\n- be explicit when missing PR/ticket/doc/boundary context limited confidence\n- do not post comments, approve, reject, or merge unless the user explicitly asks\n- if reflection scoring suppressed findings, do NOT mention the count or rationale -- only present the final kept findings\n\nIMPORTANT: Emit a structured verdict via your advance call's output.artifacts[] parameter (complete_step in daemon sessions, continue_workflow in MCP sessions). Required fields on the outer object; enrichment fields are optional on each finding:\n{\n  \"kind\": \"wr.review_verdict\",\n  \"verdict\": \"clean\" | \"minor\" | \"blocking\",\n  \"confidence\": \"high\" | \"medium\" | \"low\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\" | \"major\" | \"minor\" | \"nit\",\n      \"summary\": \"one-line description\",\n      \"findingCategory\": \"correctness\" | \"security\" | \"architecture\" | \"ux\" | \"performance\" | \"testing\" | \"style\",\n      \"file\": \"path/to/file.ts\",\n      \"startLine\": 42,\n      \"endLine\": 47,\n      \"causalLink\": \"one sentence: why this PR introduced or worsened this issue\",\n      \"remediation\": \"one sentence: the smallest credible fix or verification step\"\n    }\n  ],\n  \"summary\": \"one-line overall verdict summary\"\n}\nFor a clean review: findings: []. verdict: clean = no blocking issues, minor = small issues only, blocking = critical or major issues found. file/startLine/endLine/causalLink/remediation are optional enrichment fields -- include them for Critical and Major findings. omit endLine if single-line.",
       "outputContract": {
         "contractRef": "wr.contracts.review_verdict"
       },
-      "requireConfirmation": { "kind": "human_approval" }
+      "requireConfirmation": {
+        "kind": "human_approval",
+        "condition": {
+          "not": {
+            "var": "recommendation",
+            "equals": "clean"
+          }
+        }
+      }
     }
   ]
 }

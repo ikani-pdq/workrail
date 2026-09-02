@@ -1,6 +1,10 @@
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND, VALID_METRICS_OUTCOME } from '../durable-core/constants.js';
 import type { MetricsOutcome } from '../durable-core/constants.js';
+import type { ClientUsage, TokenSnapshot } from '../durable-core/schemas/session/usage.js';
+import type { GitEvidence } from '../durable-core/schemas/session/git-evidence.js';
+
+export type { GitEvidence, GitCommittedDiff, GitWorkingTreeState } from '../durable-core/schemas/session/git-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -24,6 +28,12 @@ export interface SessionMetricsV2 {
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
+  /**
+   * Confidence that git capture succeeded for this session run.
+   * Populated from run_completed; supports 'high' and 'none' only.
+   * For three-level confidence ('high' | 'partial' | 'none') and authoritative
+   * engine-side git evidence, prefer gitEvidence.captureConfidence.
+   */
   readonly captureConfidence: 'high' | 'none';
   /**
    * Wall-clock duration of the run in milliseconds.
@@ -37,6 +47,55 @@ export interface SessionMetricsV2 {
   readonly filesChanged: number | null;
   readonly linesAdded: number | null;
   readonly linesRemoved: number | null;
+  /**
+   * Token usage per MCP client, derived from usage_recorded events.
+   *
+   * Empty array when no usage was recorded (e.g. session completed before the
+   * ClientUsageReader pipeline was deployed, or no client log was found).
+   * One element per client that reported usage (typically just claude-code).
+   */
+  readonly usageEvents: readonly ClientUsage[];
+  /**
+   * Token delta for this workflow run: end snapshot minus start snapshot.
+   *
+   * null when either token_checkpoint event is absent (pre-feature sessions,
+   * or sessions where the JSONL snapshot failed). Non-null means both
+   * checkpoints were written and the delta is computable.
+   */
+  readonly tokenDelta: TokenSnapshot | null;
+  /**
+   * Authoritative engine-side git diff evidence for this session.
+   *
+   * Populated from the `git_metrics_recorded` event when present.
+   * null when that event is absent (session predates the feature, session
+   * is still in progress, or the fire-and-forget recording failed silently).
+   *
+   * Prefer this field over the legacy startGitSha/endGitSha/agentCommitShas
+   * fields, which are populated from run_completed and have known accuracy issues.
+   */
+  readonly gitEvidence: GitEvidence | null;
+  /**
+   * Number of workflow steps completed in this run.
+   * Derived from node_created events with nodeKind='step'.
+   * 0 for sessions that completed before any steps advanced.
+   */
+  readonly stepsCompleted: number;
+  /**
+   * Number of step retries (blocked_attempt nodes) in this run.
+   * A blocked_attempt is created when a step's output contract is not met
+   * and the engine re-presents the step. High values indicate workflow quality issues.
+   */
+  readonly retriesCount: number;
+  /**
+   * Detected client harness (e.g. 'claude-code', 'cursor', 'daemon') for this session.
+   * Null if not reported.
+   */
+  readonly harness: string | null;
+  /**
+   * Detected active model (e.g. 'claude-sonnet-4-6') for this session.
+   * Null if not reported.
+   */
+  readonly activeModel: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +238,124 @@ export function projectSessionMetricsV2(
   const finalCaptureConfidence: 'high' | 'none' =
     deliveryShas.length > 0 ? 'high' : captureConfidence;
 
+  // Collect usage_recorded events for the matching runId.
+  // One element per client that reported usage. Order follows event log order.
+  const usageEvents: ClientUsage[] = [];
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.USAGE_RECORDED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const d = e.data;
+    usageEvents.push({
+      client: typeof d.client === 'string' ? d.client : '',
+      model: typeof d.model === 'string' ? d.model : null,
+      inputTokens: typeof d.inputTokens === 'number' ? d.inputTokens : 0,
+      outputTokens: typeof d.outputTokens === 'number' ? d.outputTokens : 0,
+      cacheReadTokens: typeof d.cacheReadTokens === 'number' ? d.cacheReadTokens : 0,
+      cacheWriteTokens: typeof d.cacheWriteTokens === 'number' ? d.cacheWriteTokens : 0,
+      turns: typeof d.turns === 'number' ? d.turns : 0,
+    });
+  }
+
+  // Compute token delta from token_checkpoint events (start and end).
+  // null when either checkpoint is absent (pre-feature sessions or failed JSONL scan).
+  let startCheckpoint: TokenSnapshot | null = null;
+  let endCheckpoint: TokenSnapshot | null = null;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.TOKEN_CHECKPOINT) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const d = e.data;
+    const snap: TokenSnapshot = {
+      inputTokens: typeof d.inputTokens === 'number' ? d.inputTokens : 0,
+      outputTokens: typeof d.outputTokens === 'number' ? d.outputTokens : 0,
+      cacheReadTokens: typeof d.cacheReadTokens === 'number' ? d.cacheReadTokens : 0,
+      cacheWriteTokens: typeof d.cacheWriteTokens === 'number' ? d.cacheWriteTokens : 0,
+      turns: typeof d.turns === 'number' ? d.turns : 0,
+    };
+    if (d.phase === 'start' && !startCheckpoint) startCheckpoint = snap;
+    if (d.phase === 'end' && !endCheckpoint) endCheckpoint = snap;
+  }
+
+  const tokenDelta: TokenSnapshot | null =
+    startCheckpoint && endCheckpoint
+      ? {
+          inputTokens: Math.max(0, endCheckpoint.inputTokens - startCheckpoint.inputTokens),
+          outputTokens: Math.max(0, endCheckpoint.outputTokens - startCheckpoint.outputTokens),
+          cacheReadTokens: Math.max(0, endCheckpoint.cacheReadTokens - startCheckpoint.cacheReadTokens),
+          cacheWriteTokens: Math.max(0, endCheckpoint.cacheWriteTokens - startCheckpoint.cacheWriteTokens),
+          turns: Math.max(0, endCheckpoint.turns - startCheckpoint.turns),
+        }
+      : null;
+
+  // Project gitEvidence from git_metrics_recorded event (if present).
+  // Backward compat: null for sessions that predate the git_metrics feature.
+  let gitEvidence: GitEvidence | null = null;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.GIT_METRICS_RECORDED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const gd = e.data;
+    const committedDiff =
+      gd.filesChanged !== null && gd.linesAdded !== null && gd.linesRemoved !== null
+        ? {
+            filesChanged: gd.filesChanged,
+            linesAdded: gd.linesAdded,
+            linesRemoved: gd.linesRemoved,
+            truncated: gd.truncated,
+            changedFilePaths: Array.isArray(gd.changedFilePaths)
+              ? gd.changedFilePaths.filter((s): s is string => typeof s === 'string')
+              : [],
+            languageBreakdown: (gd.languageBreakdown != null && typeof gd.languageBreakdown === 'object' && !Array.isArray(gd.languageBreakdown))
+              ? gd.languageBreakdown as Record<string, number>
+              : {},
+          }
+        : null;
+    const workingTree =
+      gd.stagedFiles !== null && gd.unstagedFiles !== null
+        ? {
+            stagedFiles: gd.stagedFiles,
+            unstagedFiles: gd.unstagedFiles,
+          }
+        : null;
+    const churnSignal =
+      gd.churnSignal != null && typeof gd.churnSignal === 'object'
+        ? {
+            filesRemodified: typeof gd.churnSignal.filesRemodified === 'number' ? gd.churnSignal.filesRemodified : 0,
+            windowDays: typeof gd.churnSignal.windowDays === 'number' ? gd.churnSignal.windowDays : 7,
+          }
+        : null;
+    gitEvidence = {
+      startSha: typeof gd.startSha === 'string' ? gd.startSha : null,
+      endSha: typeof gd.endSha === 'string' ? gd.endSha : null,
+      commitShas: Array.isArray(gd.commitShas)
+        ? gd.commitShas.filter((s): s is string => typeof s === 'string')
+        : [],
+      prRefs: Array.isArray(gd.prRefs)
+        ? gd.prRefs.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+        : [],
+      committedDiff,
+      workingTree,
+      captureConfidence: gd.captureConfidence,
+      churnSignal,
+    };
+    break; // first git_metrics_recorded by event order wins
+  }
+
+  // Count step and retry nodes from node_created events for the matching runId.
+  let stepsCompleted = 0;
+  let retriesCount = 0;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const nodeKind = e.data.nodeKind;
+    if (nodeKind === 'step') stepsCompleted++;
+    else if (nodeKind === 'blocked_attempt') retriesCount++;
+  }
+
+  const harnessRaw = metricsContext['metrics_harness'];
+  const harness = typeof harnessRaw === 'string' ? harnessRaw : null;
+
+  const activeModelRaw = metricsContext['metrics_active_model'];
+  const activeModel = typeof activeModelRaw === 'string' ? activeModelRaw : null;
+
   return {
     startGitSha,
     endGitSha,
@@ -191,5 +368,12 @@ export function projectSessionMetricsV2(
     filesChanged,
     linesAdded,
     linesRemoved,
+    usageEvents,
+    tokenDelta,
+    gitEvidence,
+    stepsCompleted,
+    retriesCount,
+    harness,
+    activeModel,
   };
 }

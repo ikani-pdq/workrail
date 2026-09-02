@@ -15,7 +15,7 @@
     "access": "public"
   },
   "bin": {
-    "workrail": "dist/mcp-server.js",
+    "workrail": "dist/cli-workrail.js",
     "worktrain": "dist/cli-worktrain.js"
   },
   "exports": {
@@ -33,8 +33,8 @@
     "web"
   ],
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json && npm run console:build && node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755)\"",
-    "prepack": "node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755)\"",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json && npm run console:build && node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755); require('fs').chmodSync('dist/cli-worktrain.js',0o755); require('fs').chmodSync('dist/cli-workrail.js',0o755);\"",
+    "prepack": "node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755); require('fs').chmodSync('dist/cli-worktrain.js',0o755); require('fs').chmodSync('dist/cli-workrail.js',0o755);\"",
     "console:build": "cd console && npm install && npm run build",
     "console:dev": "cd console && npm run dev",
     "build:all": "npm run build",
@@ -58,6 +58,8 @@
     "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.')[0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\"",
     "dev:mcp": "pkill -f \"$(pwd)/dist/mcp-server.js\" 2>/dev/null; sleep 0.5; WORKRAIL_TRANSPORT=http WORKRAIL_ENABLE_SESSION_TOOLS=true node dist/mcp-server.js",
     "dev:mcp:watch": "pkill -f \"$(pwd)/dist/mcp-server.js\" 2>/dev/null; sleep 0.5; WORKRAIL_TRANSPORT=http WORKRAIL_ENABLE_SESSION_TOOLS=true nodemon --watch dist --ext js --delay 2 --exec 'node dist/mcp-server.js'",
+    "dev:daemon": "WORKRAIL_TRIGGERS_ENABLED=true WORKRAIL_DATA_DIR=$HOME/.workrail/dev WORKRAIL_DEFAULT_WORKSPACE=$(pwd) node dist/cli-worktrain.js daemon",
+    "dev:watch-hangs": "bash scripts/watch-rg-hangs.sh",
     "web:dev": "npm run build && node dist/cli-worktrain.js console",
     "web:ci": "node dist/cli-worktrain.js console",
     "web:typecheck": "tsc -p tsconfig.web.json",
@@ -93,8 +95,8 @@
     "prepare": "bash scripts/setup-hooks.sh"
   },
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "^0.29.0",
-    "@anthropic-ai/sdk": "^0.96.0",
+    "@anthropic-ai/bedrock-sdk": "^0.32.0",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@modelcontextprotocol/sdk": "^1.24.0",
     "@scure/base": "2.2.0",
     "ajv": "^8.17.1",
@@ -115,11 +117,13 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "workflow",
-    "orchestration",
-    "ai-assistant",
-    "task-management"
+    "workflow-enforcement",
+    "ai-agents",
+    "claude-code",
+    "step-by-step"
   ],
   "devDependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",

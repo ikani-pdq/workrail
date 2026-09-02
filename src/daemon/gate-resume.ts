@@ -73,7 +73,7 @@ export async function resumeFromGate(
   sessionId: string,
   verdict: GateVerdict,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   runWorkflowFn: typeof runWorkflow,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
@@ -90,9 +90,10 @@ export async function resumeFromGate(
     workflowId?: string;
     goal?: string;
     workspacePath?: string;
-    branchStrategy?: 'worktree' | 'none';
+    branchStrategy?: 'worktree' | 'none' | 'read-only';
     worktreePath?: string;
     continueToken?: string;
+    context?: Record<string, unknown>;
   };
   try {
     const raw = await fs.readFile(sidecarPath, 'utf8');
@@ -179,6 +180,7 @@ export async function resumeFromGate(
     firstStepPrompt,
     isComplete: false,
     triggerSource: 'daemon',
+    stepId: rehydrated.pending?.stepId,
     ...(sidecar.worktreePath !== undefined ? { sessionWorkspacePath: sidecar.worktreePath } : {}),
   };
 
@@ -187,6 +189,7 @@ export async function resumeFromGate(
     goal,
     workspacePath,
     branchStrategy: sidecar.branchStrategy ?? 'none',
+    context: sidecar.context,
   };
 
   const source: SessionSource = {
