@@ -14,7 +14,7 @@
 import { composeServer } from '../server.js';
 import { bindWithPortFallback, DEFAULT_BIND_HOST } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
-import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup, registerGracefulShutdown, fatalExit } from './fatal-exit.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -22,7 +22,7 @@ import express from 'express';
 const HTTP_PORT_SCAN_END = 3199;
 
 /** Host names that are considered loopback-only. Binds to anything else
- * trigger a startup warning because the MCP endpoint has no auth. */
+ * refuses to start because the MCP endpoint has no auth. */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
 export async function startHttpServer(port: number): Promise<void> {
@@ -30,20 +30,35 @@ export async function startHttpServer(port: number): Promise<void> {
   registerFatalHandlers('http');
   logStartup('http', { port });
 
-  const { server, ctx } = await composeServer();
-
   // Loopback by default; WORKRAIL_HTTP_HOST overrides. The MCP endpoint has no
   // auth, so non-loopback binds expose every tool call to anyone who can reach
-  // the port. Surface that loudly at startup if someone opts in.
+  // the port. Checked before composeServer() so an invalid host never pays for
+  // full server composition, and refused outright rather than just warned —
+  // there is no authentication layer to fall back on.
   const host = (process.env.WORKRAIL_HTTP_HOST ?? DEFAULT_BIND_HOST).trim() || DEFAULT_BIND_HOST;
-  if (!LOOPBACK_HOSTS.has(host)) {
-    console.error(
-      `[Transport] WARNING: WORKRAIL_HTTP_HOST=${host} binds the MCP transport ` +
-      `beyond loopback. The endpoint has no authentication; any host that can ` +
-      `reach this port can call MCP tools as you. Set WORKRAIL_HTTP_HOST=127.0.0.1 ` +
-      `(default) unless you have an external authentication layer in front.`
+  // Case-insensitive: a benign spelling variant (e.g. "LOCALHOST") is still
+  // loopback intent and must not hit the same hard-refusal path as a genuine
+  // non-loopback host. The original `host` (not lowercased) is what actually
+  // gets bound below, so this only relaxes the *check*.
+  if (!LOOPBACK_HOSTS.has(host.toLowerCase())) {
+    fatalExit(
+      'Non-loopback HTTP bind refused',
+      new Error(
+        `WORKRAIL_HTTP_HOST=${host} would bind the MCP transport beyond loopback. ` +
+        `The endpoint has no authentication; any host that can reach this port ` +
+        `could call MCP tools as you. Set WORKRAIL_HTTP_HOST=127.0.0.1 (default) ` +
+        `unless you have an external authentication layer in front.`
+      ),
+      'config',
     );
+    // fatalExit() calls process.exit(1); this return only matters if fatalExit()
+    // no-oped because its re-entrancy guard was already tripped by an earlier
+    // fatal condition in this process — without it we'd fall through and bind
+    // anyway on a host we just refused.
+    return;
   }
+
+  const { server, ctx } = await composeServer();
 
   // Scan from the requested port up to HTTP_PORT_SCAN_END so a second
   // concurrent WorkRail instance can bind to a different port rather than

@@ -59,21 +59,22 @@ WorkRail has three network-adjacent listeners. All bind to loopback
 
 | Listener | Default bind | Override | Auth |
 |----------|--------------|----------|------|
-| MCP HTTP transport | `127.0.0.1:3100` | `WORKRAIL_HTTP_HOST` env var | None |
+| MCP HTTP transport | `127.0.0.1:3100` | `WORKRAIL_HTTP_HOST` env var (non-loopback values refuse to start) | None |
 | Console            | `127.0.0.1:3456` | (none; intentionally loopback) | None |
 | Trigger webhook listener | `127.0.0.1:<configured>` | (none) | Per trigger config |
 
 ### `WORKRAIL_HTTP_HOST`
 
 Setting this to anything other than `127.0.0.1`, `::1`, or `localhost`
-publishes the MCP HTTP endpoint on the named interface. Because the endpoint
-has no authentication, any host that can reach the chosen address and port can
-call MCP tools as the running user, including starting workflows, advancing
-state, and reading session output.
+would publish the MCP HTTP endpoint on the named interface. Because the
+endpoint has no authentication, any host that can reach the chosen address
+and port could call MCP tools as the running user, including starting
+workflows, advancing state, and reading session output.
 
-WorkRail logs a startup warning when a non-loopback value is detected. Do not
-suppress this warning by tightening firewalls alone; place an authenticated
-reverse proxy in front of WorkRail before changing the bind.
+WorkRail refuses to start when a non-loopback value is detected -- there is
+no way to tighten firewalls alone and keep running; place an authenticated
+reverse proxy in front of WorkRail and put it on the loopback interface
+instead. There is no override flag for this check.
 
 ### Console exposure
 
