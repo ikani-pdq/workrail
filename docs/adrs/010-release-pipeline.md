@@ -1,7 +1,19 @@
 # ADR-010: Release Pipeline and Version Synchronization
 
-**Status:** Adopted  
+**Status:** Adopted (npm publishing since removed in this fork -- see note below)
 **Date:** 2026-04-17
+
+> **Update (this fork):** This ADR documents the pipeline as it existed
+> upstream, including the `npm publish` / OIDC trusted-publishing step. This
+> fork no longer publishes to npm at all -- `package.json` is `"private":
+> true` and `.releaserc.cjs` has no `@semantic-release/npm` plugin. A stale
+> fork of this repo (`iconza98/workrail`) was found publishing releases to
+> the shared `@ikani.samani/workrail` npm package with provenance pointing at
+> itself rather than `ikani-pdq/workrail`, which is exactly the class of risk
+> removing the publish step eliminates. The version-bump PR, GitHub App
+> token, and GitHub Release/tag mechanics described below are otherwise
+> still accurate for this fork; only the "npm publishing" section and the
+> `exec.publishCmd` line are no longer in effect.
 
 ## Context
 

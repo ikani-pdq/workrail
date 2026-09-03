@@ -92,9 +92,6 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
-          # Publish target: public npm registry, under the @ikani.samani scope.
-          registry-url: https://registry.npmjs.org
-          scope: '@ikani.samani'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -134,12 +131,10 @@ jobs:
       - name: Release
         env:
           # semantic-release uses GITHUB_TOKEN for the @semantic-release/github
-          # plugin (release notes, GitHub Releases). NODE_AUTH_TOKEN is what
-          # @semantic-release/npm reads to authenticate to the npm registry.
-          # Add NPM_TOKEN to the repo secrets before the first release.
+          # plugin (release notes, GitHub Releases). Nothing publishes to a
+          # package registry -- this fork is install-from-source only.
           GITHUB_TOKEN: ${{ steps.token.outputs.value }}
           GH_TOKEN: ${{ steps.token.outputs.value }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           WORKRAIL_ALLOW_MAJOR_RELEASE: ${{ vars.WORKRAIL_ALLOW_MAJOR_RELEASE }}
         run: |
           set -euo pipefail
@@ -216,11 +211,13 @@ jobs:
             exit 1
           fi
 
-          VERSION="${POST_TAG#v}"
-
-          # If the registry already has this version, keep the tag (avoid flip-flopping).
-          if npm view "@ikani.samani/workrail@${VERSION}" version >/dev/null 2>&1; then
-            echo "Version ${VERSION} exists on npm; keeping tag ${POST_TAG}"
+          # If @semantic-release/github already published a GitHub Release for
+          # this tag, the release is real and public -- keep it even if a
+          # later step (e.g. the version-bump PR) failed. There is no
+          # registry publish step to check anymore; the GitHub Release is the
+          # actual deliverable.
+          if gh release view "${POST_TAG}" >/dev/null 2>&1; then
+            echo "GitHub Release ${POST_TAG} already exists; keeping it"
             echo "RELEASE_TAG_CLEANUP_STATUS=kept_published" >> "$GITHUB_ENV"
             echo "RELEASE_TAG_CLEANUP_TAG=${POST_TAG}" >> "$GITHUB_ENV"
             exit 0
