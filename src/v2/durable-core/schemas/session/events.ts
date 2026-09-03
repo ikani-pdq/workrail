@@ -377,6 +377,121 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       submittedAt: z.string(),
     }),
   }),
+  /**
+   * usage_recorded: appended fire-and-forget after run_completed by the
+   * ClientUsageReader pipeline (src/mcp/client-usage/).
+   *
+   * WHY a separate event (not part of run_completed): usage data is collected
+   * asynchronously after the session lock is released. run_completed fires
+   * inside the lock; usage_recorded fires after it.
+   *
+   * WHY per-client: multiple MCP clients (Claude Code, Cursor, etc.) may run
+   * the same session. One event per client that was detected.
+   *
+   * WHY model is nullable: the client log may not record the model for every turn.
+   * null means 'model not recorded', not 'no model was used'.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('usage_recorded'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      client: z.string().min(1),
+      model: z.string().nullable(),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      turns: z.number().int().nonnegative(),
+    }),
+  }),
+  /**
+   * token_checkpoint: point-in-time snapshot of cumulative conversation token usage,
+   * written fire-and-forget at workflow start (phase='start') and session completion
+   * (phase='end'). The delta between end and start gives tokens consumed by the run.
+   *
+   * WHY two checkpoints instead of one: the start snapshot captures conversation state
+   * before the workflow, isolating the workflow's contribution from prior turns.
+   *
+   * WHY no client/model fields: the snapshot is taken before per-session correlation
+   * is possible (at start) or in addition to usage_recorded (at end). The data is
+   * conversation-level, not session-attributed.
+   *
+   * WHY empirically validated: we confirmed the current turn IS written to the JSONL
+   * before the MCP handler executes, so both snapshots are complete at capture time.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('token_checkpoint'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      phase: z.enum(['start', 'end']),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      turns: z.number().int().nonnegative(),
+    }),
+  }),
+  /**
+   * git_start_recorded: baseline working-tree state captured fire-and-forget after
+   * start_workflow succeeds. Records staged and unstaged file counts at the moment
+   * the agent began working, enabling detection of pre-existing dirty state.
+   *
+   * WHY scope: undefined (same as observation_recorded): fires before any run_started
+   * event, so no runId is available yet.
+   *
+   * WHY separate from git_metrics_recorded: start-time dirty state is only observable
+   * at session start; it cannot be retroactively captured at session completion.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('git_start_recorded'),
+    scope: z.undefined(),
+    data: z.object({
+      repoRoot: z.string().min(1),
+      stagedFiles: z.number().int().nonnegative(),
+      unstagedFiles: z.number().int().nonnegative(),
+    }),
+  }),
+  /**
+   * git_metrics_recorded: authoritative committed diff and working-tree state captured
+   * fire-and-forget after session completion (isComplete === true). Replaces agent-reported
+   * metrics_* context_set values as the canonical source for lines/files changed.
+   *
+   * WHY a separate event (not part of run_completed): git diff runs after the session lock
+   * is released. run_completed fires inside the lock; git_metrics_recorded fires after it.
+   *
+   * WHY captureConfidence: 'high'|'partial'|'none': distinct from run_completed's
+   * 'high'|'none' -- partial means endSha is available but diff failed or was truncated.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('git_metrics_recorded'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      startSha: z.string().nullable(),
+      endSha: z.string().nullable(),
+      commitShas: z.array(z.string()),
+      prRefs: z.array(z.number().int().positive()),
+      /** null means the diff command failed or timed out; zero-change is a zero-valued struct. */
+      filesChanged: z.number().int().nonnegative().nullable(),
+      linesAdded: z.number().int().nonnegative().nullable(),
+      linesRemoved: z.number().int().nonnegative().nullable(),
+      truncated: z.boolean(),
+      // WHY optional().default(): these fields were added after the initial git_metrics_recorded
+      // schema shipped in #1129. Existing events in the session store lack them. Zod requires
+      // optional() to avoid treating missing fields as corruption; default() ensures the
+      // projection always receives a usable zero value rather than undefined.
+      changedFilePaths: z.array(z.string()).optional().default([]),
+      languageBreakdown: z.record(z.string(), z.number().int().nonnegative()).optional().default({}),
+      /** null means the status command failed. */
+      stagedFiles: z.number().int().nonnegative().nullable(),
+      unstagedFiles: z.number().int().nonnegative().nullable(),
+      captureConfidence: z.enum(['high', 'partial', 'none']),
+      /** null means churn check was not run. */
+      churnSignal: z.object({
+        filesRemodified: z.number().int().nonnegative(),
+        windowDays: z.number().int().positive(),
+      }).nullable().optional().default(null),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;

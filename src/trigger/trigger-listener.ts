@@ -276,9 +276,13 @@ export async function startTriggerListener(
     return null;
   }
 
-  // Resolve API key
+  // Resolve API key.
+  // Optional when AWS credentials (AWS_PROFILE or AWS_ACCESS_KEY_ID) are present --
+  // those sessions use AnthropicBedrock which does not require an Anthropic API key.
+  // buildAgentClient() enforces the key is present when it is actually needed.
   const apiKey = options.apiKey ?? env['ANTHROPIC_API_KEY'];
-  if (!apiKey) {
+  const hasBedrock = !!(env['AWS_PROFILE'] || env['AWS_ACCESS_KEY_ID']);
+  if (!apiKey && !hasBedrock) {
     return { _kind: 'err', error: { kind: 'missing_api_key' } };
   }
 
@@ -488,7 +492,7 @@ export async function startTriggerListener(
   // call executeContinueWorkflow with intent: 'rehydrate' for sessions with progress).
   // WHY pass runWorkflowFn: crash-recovered sessions resume via runWorkflow; passing the
   // enricher-wrapped fn ensures recovered root sessions also receive context enrichment.
-  await runStartupRecovery(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey, triggerIndex).catch((err: unknown) => {
+  await runStartupRecovery(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey, triggerIndex, undefined, router.gateResumeCallback).catch((err: unknown) => {
     console.warn(
       '[TriggerListener] Startup recovery encountered an unexpected error:',
       err instanceof Error ? err.message : String(err),

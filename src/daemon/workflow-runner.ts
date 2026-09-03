@@ -34,12 +34,11 @@ import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import { AgentLoop } from "./agent-loop.js";
 import type { AgentTool, AgentEvent, AgentLoopCallbacks, AgentInternalMessage } from "./agent-loop.js";
 import type { V2ToolContext } from '../mcp/types.js';
-import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
-import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
-import type { ContinueTokenResolved } from '../mcp/handlers/v2-token-ops.js';
+import { parseContinueTokenOrFail } from '../v2/usecases/v2-token-ops.js';
+import type { ContinueTokenResolved } from '../v2/usecases/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import type { SessionEventLogReadonlyStorePortV2, LoadedValidatedPrefixV2, SessionEventLogStoreError } from '../v2/ports/session-event-log-store.port.js';
 import type { ToolFailure } from '../mcp/handlers/v2-execution-helpers.js';
@@ -147,7 +146,9 @@ import type {
   SessionOutcome,
   FinalizationContext,
   TurnEndSubscriberContext,
+  SessionPaths,
 } from './runner/index.js';
+import { buildSessionPaths } from './runner/index.js';
 export type {
   PreAgentSession,
   PreAgentSessionResult,
@@ -157,6 +158,7 @@ export type {
   TurnEndSubscriberContext,
 } from './runner/index.js';
 export { WORKTREES_DIR } from './runner/runner-types.js';
+export { buildSessionPaths } from './runner/index.js';
 export {
   buildPreAgentSession,
   buildTurnEndSubscriber,
@@ -305,7 +307,7 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
 export async function runWorkflow(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,
@@ -440,8 +442,8 @@ export async function runWorkflow(
   );
 
   // ---- Agent loop phase: run prompt loop to completion ----
-  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
-  const outcome = await runAgentLoop(readySession, trigger, conversationPath);
+  const sessionPaths = buildSessionPaths(sessionsDir, String(sessionId));
+  const outcome = await runAgentLoop(readySession, trigger, sessionPaths);
 
   // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
   const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
@@ -457,7 +459,7 @@ export async function runWorkflow(
     branchStrategy: trigger.branchStrategy,
     statsDir,
     sessionsDir,
-    conversationPath,
+    conversationPath: sessionPaths.conversationPath,
     emitter,
     daemonRegistry,
     workflowId: trigger.workflowId,

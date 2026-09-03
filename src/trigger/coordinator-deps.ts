@@ -28,7 +28,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import type { AdaptiveCoordinatorDeps } from '../coordinators/adaptive-pipeline.js';
 import type { CoordinatorSpawnContext } from '../coordinators/types.js';
 import type { ChildSessionResult } from '../coordinators/types.js';
-import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
+import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { createContextAssembler } from '../context-assembly/index.js';
 import { createListRecentSessions } from '../context-assembly/infra.js';
@@ -265,16 +265,16 @@ export class SessionReader {
       const agentResult = await this.fetchAgentResult(handle);
       return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
     }
+    if (statusResult.kind === 'paused_at_gate') {
+      // Session is parked at a gate; pre-gate artifacts are available but the gated step has
+      // not executed. Return success so callers can read artifacts (e.g. wr.review_verdict
+      // emitted before the gate). The 'paused_at_gate' outcome in awaitSessions lets callers
+      // distinguish this case if needed.
+      const agentResult = await this.fetchAgentResult(handle);
+      return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
+    }
     if (statusResult.kind === 'blocked') {
       return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
-    }
-    // Gate checkpoint: session paused at a requireConfirmation gate. PR 2 will dispatch
-    // the gate evaluator; for now, treat as failed to unblock the coordinator.
-    if (statusResult.kind === 'paused_at_gate') {
-      // Gate evaluation for child sessions spawned by spawn_agent is not yet wired.
-      // The TriggerRouter handles top-level gate evaluation; child session gates escalate
-      // to the parent as 'stuck' so the parent can report_issue and the operator is notified.
-      return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} paused at gate checkpoint (step '${statusResult.stepId}'). Parent session should report_issue.` };
     }
     if (statusResult.kind === 'hard_fail') {
       process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] fetchChildSessionResult: ${statusResult.message}\n`);
@@ -286,12 +286,12 @@ export class SessionReader {
   }
 
   async awaitSessions(handles: readonly string[], timeoutMs: number): Promise<{
-    results: Array<{ handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>;
+    results: Array<{ handle: string; outcome: 'success' | 'paused_at_gate' | 'failed' | 'timeout'; status: string | null; durationMs: number }>;
     allSucceeded: boolean;
   }> {
     const startMs = Date.now();
     const pending = new Set(handles);
-    const results = new Map<string, { handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>();
+    const results = new Map<string, { handle: string; outcome: 'success' | 'paused_at_gate' | 'failed' | 'timeout'; status: string | null; durationMs: number }>();
 
     while (pending.size > 0) {
       if (Date.now() - startMs >= timeoutMs) break;
@@ -306,8 +306,9 @@ export class SessionReader {
             results.set(handle, { handle, outcome: 'failed', status: 'blocked', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'paused_at_gate') {
-            // Gate checkpoint: treat as terminal for now. PR 2 will dispatch the gate evaluator.
-            results.set(handle, { handle, outcome: 'failed', status: 'paused_at_gate', durationMs: Date.now() - startMs });
+            // Gate checkpoint: session is parked waiting for gate evaluation. Artifacts from
+            // pre-gate steps are available, but the gated step has not yet executed.
+            results.set(handle, { handle, outcome: 'paused_at_gate', status: 'paused_at_gate', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'hard_fail') {
             process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] awaitSessions: ${statusResult.message}\n`);
@@ -374,44 +375,58 @@ class CoordinatorDepsImpl implements AdaptiveCoordinatorDeps {
     trigger: WorkflowTrigger;
     parentSessionId?: string;
   }): Promise<{ kind: 'ok'; handle: string } | { kind: 'err'; error: string }> {
+    const startContext: Record<string, string> = {
+      is_autonomous: 'true',
+      workspacePath: opts.workspace,
+      triggerSource: 'daemon',
+      ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
+    };
+
+    if (opts.trigger.context) {
+      for (const [k, v] of Object.entries(opts.trigger.context)) {
+        if (v !== undefined && v !== null) {
+          startContext[k] = typeof v === 'string' ? v : JSON.stringify(v);
+        }
+      }
+    }
+
     const startResult = await executeStartWorkflow(
-      { workflowId: opts.workflowId, workspacePath: opts.workspace, goal: opts.goal },
-      this.ctx,
       {
-        is_autonomous: 'true',
-        workspacePath: opts.workspace,
-        triggerSource: 'daemon',
-        ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
+        gate: this.ctx.v2.gate,
+        sessionStore: this.ctx.v2.sessionStore,
+        snapshotStore: this.ctx.v2.snapshotStore,
+        pinnedStore: this.ctx.v2.pinnedStore,
+        crypto: this.ctx.v2.crypto,
+        tokenCodecPorts: this.ctx.v2.tokenCodecPorts,
+        idFactory: this.ctx.v2.idFactory,
+        validationPipelineDeps: this.ctx.v2.validationPipelineDeps,
+        tokenAliasStore: this.ctx.v2.tokenAliasStore,
+        entropy: this.ctx.v2.entropy,
+        resolvedRootUris: this.ctx.v2.resolvedRootUris,
+        rememberedRootsStore: this.ctx.v2.rememberedRootsStore,
+        managedSourceStore: this.ctx.v2.managedSourceStore,
+        workspaceResolver: this.ctx.v2.workspaceResolver,
+        fallbackWorkflowReader: this.ctx.workflowService,
+        featureFlags: this.ctx.featureFlags,
       },
+      { workflowId: opts.workflowId, workspacePath: opts.workspace, goal: opts.goal },
+      startContext,
     );
     if (startResult.isErr()) {
       const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;
       return { kind: 'err', error: `Session creation failed: ${detail}` };
     }
 
-    const startContinueToken = startResult.value.response.continueToken;
-    if (!startContinueToken) {
-      return { kind: 'ok', handle: opts.workflowId };
-    }
+    const res = startResult.value;
+    const handle = res.sessionId;
 
-    const tokenResult = await parseContinueTokenOrFail(
-      startContinueToken,
-      this.ctx.v2.tokenCodecPorts,
-      this.ctx.v2.tokenAliasStore,
-    );
-    if (tokenResult.isErr()) {
-      process.stderr.write(`[ERROR coordinator-deps:spawnSessionCore] Failed to decode session handle: ${tokenResult.error.message}\n`);
-      return { kind: 'err', error: 'Internal error: could not extract session handle from new session' };
-    }
-    const handle = tokenResult.value.sessionId;
-
-    const r = startResult.value.response;
     const allocatedSession: AllocatedSession = {
-      continueToken: r.continueToken ?? '',
-      checkpointToken: r.checkpointToken,
-      firstStepPrompt: r.pending?.prompt ?? '',
-      isComplete: r.isComplete,
+      continueToken: res.continueToken,
+      checkpointToken: res.checkpointToken,
+      firstStepPrompt: res.meta.prompt,
+      isComplete: false,
       triggerSource: 'daemon',
+      stepId: res.meta.stepId,
     };
     const source: SessionSource = { kind: 'pre_allocated', trigger: opts.trigger, session: allocatedSession };
     this.dispatch(opts.trigger, source);

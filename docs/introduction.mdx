@@ -1,0 +1,82 @@
+---
+title: "What is WorkRail?"
+description: "MCP workflow enforcement server -- makes AI agent behavior deterministic and repeatable"
+---
+
+Ask an AI agent to fix a bug and it might plan carefully, or it might start editing code immediately based on a 30-second skim. Ask it again tomorrow and you get a different process. **WorkRail makes agent behavior deterministic and repeatable** -- the same workflow executes the same way every time, regardless of the model or conversation.
+
+WorkRail is an MCP server. It drip-feeds workflow steps to the agent one at a time through the [Model Context Protocol](https://modelcontextprotocol.org). The agent calls `start_workflow`, gets step 1, completes it, calls `continue_workflow`. It cannot skip ahead or cut corners because **it does not know future steps exist yet.**
+
+No separate process to run. No infrastructure to manage. Just add it to your MCP config and prompt your agent.
+
+## Quick Start
+
+Add WorkRail to your MCP client configuration (Claude Code, Cursor, or any MCP client):
+
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"]
+    }
+  }
+}
+```
+
+Then prompt your agent:
+
+```
+Use the bug-investigation workflow to debug this auth issue
+```
+
+WorkRail discovers available workflows automatically, starts at step 1, and walks the agent through systematically.
+
+## How it works
+
+```
+Agent                     WorkRail
+  │                          │
+  │  start_workflow()        │
+  │─────────────────────────>│
+  │                          │
+  │   Step 1: Understand     │
+  │      the problem         │
+  │<─────────────────────────│
+  │                          │
+  │  continue_workflow()     │
+  │─────────────────────────>│
+  │                          │
+  │   Step 2: Plan your      │
+  │      investigation       │
+  │<─────────────────────────│
+```
+
+The agent never sees step 2 until step 1 is complete. This is the enforcement mechanism -- not instructions the agent can choose to follow, but a structural constraint it cannot circumvent.
+
+Sessions are durable -- work is saved to disk at every step and can be resumed across conversations with `resume_session`. Close the chat, come back tomorrow, pick up exactly where you left off.
+
+## What's included
+
+WorkRail ships with 30+ workflows for coding, review, debugging, documentation, and more. See the [Workflows](/docs/workflows) page for the full list.
+
+## Write your own
+
+Drop a JSON file in `~/.workrail/workflows/` and WorkRail discovers it automatically:
+
+```json
+{
+  "id": "my-review-checklist",
+  "name": "Team Code Review",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "check-tests",
+      "title": "Verify Test Coverage",
+      "prompt": "List all new code paths that lack test coverage."
+    }
+  ]
+}
+```
+
+See the [Authoring Guide](/docs/authoring-v2) for the full schema and workflow design principles.

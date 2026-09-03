@@ -89,6 +89,7 @@ export async function persistTokens(
     readonly goal: string;
     readonly workspacePath: string;
     readonly branchStrategy?: import('../types.js').BranchStrategy;
+    readonly context?: Readonly<Record<string, unknown>>;
   },
   gateState?: {
     readonly kind: 'gate_checkpoint';
@@ -98,7 +99,11 @@ export async function persistTokens(
   workrailSessionId?: SessionId | null,
 ): Promise<Result<void, PersistTokensError>> {
   try {
-    await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+    // DAEMON_SESSIONS_DIR also holds pending-delivery-*.json sidecars containing a live
+    // credential (e.g. a GitHub PAT) -- owner-only dir mode, matching WORKRAIL_DIR_MODE in
+    // src/v2/infra/local/fs/index.ts. Note: mode only applies at creation time -- an
+    // already-existing directory keeps its prior mode until manually chmod'd.
+    await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true, mode: 0o700 });
 
     const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
     const state = JSON.stringify(
@@ -112,6 +117,7 @@ export async function persistTokens(
           goal: recoveryContext.goal,
           workspacePath: recoveryContext.workspacePath,
           ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
+          ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
         } : {}),
         ...(gateState !== undefined ? { gateState } : {}),
         ...(workrailSessionId != null ? { workrailSessionId } : {}),

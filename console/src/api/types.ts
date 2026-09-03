@@ -82,12 +82,77 @@ export type ConsoleSessionHealth = 'healthy' | 'corrupt';
  * Mirror of SessionMetricsV2 in src/v2/projections/session-metrics.ts.
  * Keep in sync with the backend definition.
  */
+
+export type ClientUsage = {
+  readonly client: string;
+  readonly model: string | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly turns: number;
+};
+
+/**
+ * Mirror of TokenSnapshot in src/v2/durable-core/schemas/session/usage.ts.
+ * Keep in sync with the backend definition.
+ */
+export type TokenSnapshot = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly turns: number;
+};
+
+/**
+ * Mirror of GitCommittedDiff in src/mcp/git-metrics/types.ts.
+ * Keep in sync with the backend definition.
+ */
+export type GitCommittedDiff = {
+  readonly filesChanged: number;
+  readonly linesAdded: number;
+  readonly linesRemoved: number;
+  readonly truncated: boolean;
+  readonly changedFilePaths: readonly string[];
+  readonly languageBreakdown: Readonly<Record<string, number>>;
+};
+
+/**
+ * Mirror of GitWorkingTreeState in src/mcp/git-metrics/types.ts.
+ * Keep in sync with the backend definition.
+ */
+export type GitWorkingTreeState = {
+  readonly stagedFiles: number;
+  readonly unstagedFiles: number;
+};
+
+/**
+ * Mirror of GitEvidence in src/mcp/git-metrics/types.ts.
+ * Authoritative engine-side git diff evidence for a completed session.
+ * Keep in sync with the backend definition.
+ */
+export type GitEvidence = {
+  readonly startSha: string | null;
+  readonly endSha: string | null;
+  readonly commitShas: readonly string[];
+  readonly prRefs: readonly number[];
+  /** null means the diff command failed or timed out. */
+  readonly committedDiff: GitCommittedDiff | null;
+  /** null means the status command failed or timed out. */
+  readonly workingTree: GitWorkingTreeState | null;
+  readonly captureConfidence: 'high' | 'partial' | 'none';
+  /** null means churn check was not run (git unavailable or no changed files). */
+  readonly churnSignal: { readonly filesRemodified: number; readonly windowDays: number } | null;
+};
+
 export interface SessionMetricsV2 {
   // From run_completed event (engine-authoritative)
   readonly startGitSha: string | null;
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
+  /** @deprecated Always 'none' since PR #903. Use gitEvidence.captureConfidence. */
   readonly captureConfidence: 'high' | 'none';
   readonly durationMs: number | undefined;
   // From context_set metrics_* keys (agent-reported, each independently nullable)
@@ -96,6 +161,15 @@ export interface SessionMetricsV2 {
   readonly filesChanged: number | null;
   readonly linesAdded: number | null;
   readonly linesRemoved: number | null;
+  // From usage_recorded events (one entry per MCP client detected)
+  readonly usageEvents: readonly ClientUsage[];
+  // From token_checkpoint events (start/end delta for this workflow run)
+  readonly tokenDelta: TokenSnapshot | null;
+  // From git_metrics_recorded event (engine-authoritative git diff, null for old sessions)
+  readonly gitEvidence: GitEvidence | null;
+  // From node_created events (step and blocked_attempt counts)
+  readonly stepsCompleted: number;
+  readonly retriesCount: number;
 }
 
 export interface ConsoleSessionSummary {

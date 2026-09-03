@@ -314,6 +314,44 @@ npm run dev:mcp
 
 **Config note:** The project `.mcp.json` `workrail` entry should shadow the global `~/.claude/settings.json` entry when Claude Code is started from this repo. Verify via `/mcp` on first use -- if two `workrail` entries appear, rename the `.mcp.json` entry to `workrail-dev`.
 
+### Local dev loop (daemon / WorkTrain)
+
+To test the WorkTrain daemon from a branch before merging -- including full autonomous pipeline runs, webhook dispatch, and end-to-end review flows:
+
+```bash
+# Terminal 1: build and start an isolated daemon instance
+npm run build && npm run dev:daemon
+
+# Terminal 2: use any worktrain command against the running dev daemon
+worktrain dispatch --pr 1051 -w /path/to/repo
+worktrain dispatch "implement the foo feature" -w /path/to/repo
+worktrain logs --follow
+worktrain diagnose
+worktrain session events <id>
+worktrain console
+```
+
+**What `dev:daemon` does differently from the production daemon:**
+- Writes all session data, logs, and sidecars to `~/.workrail/dev/` instead of `~/.workrail/` -- no contamination of production sessions
+- Sets `WORKRAIL_DEFAULT_WORKSPACE` to the repo root automatically
+- Reads `triggers.yml` from the repo root (same as production)
+- All `worktrain` commands talk to port 3200 regardless of how the daemon was started -- they work identically against a dev daemon
+
+**No watch mode for the daemon** -- unlike the MCP server, the daemon has in-flight sessions that would be killed ungracefully on restart.
+
+**Investigating rg hangs** -- there is a known intermittent issue where `rg` run inside a worktree hangs for 120s before being killed by the stall timer. Root cause is not yet confirmed. To capture diagnostics when the hang occurs, run this in a third terminal alongside the daemon:
+
+```bash
+npm run dev:watch-hangs
+```
+
+This polls for rg processes in worktrees and auto-captures `lsof` (open files), `sample` (call stack / blocked syscall), and `opensnoop` (real-time file opens) when any rg takes longer than 2 seconds. Diagnostics are written to `~/.workrail/dev/rg-hang-<timestamp>.txt`. To test a code change: stop the daemon (Ctrl-C), run `npm run build`, restart with `npm run dev:daemon`.
+
+**To wipe dev session state between test runs:**
+```bash
+rm -rf ~/.workrail/dev
+```
+
 ## When adding a new engine feature
 
 A "new engine feature" means any of:
@@ -405,6 +443,7 @@ When the project owner asks you to create a PR or merge:
 
 These principles guide all code decisions in this project. When writing, reviewing, or analyzing code, justify structural choices against them. When multiple principles conflict, surface the tension explicitly.
 
+- **Both-sides-of-the-fence execution** -- compile once, execute polymorphically. Design every workflow step and feature to work seamlessly across two environments: interactive stdio MCP client sessions (zero control, precise directives) and autonomous Daemon runner sessions (total control, native execution).
 - **Immutability by default** -- make data read-only; confine mutation behind explicit, minimal APIs
 - **Architectural fixes over patches** -- solve root causes by changing constraints and invariants, not by adding localized special-cases
 - **Make illegal states unrepresentable** -- model domain states so invalid combinations cannot be constructed
@@ -421,6 +460,33 @@ These principles guide all code decisions in this project. When writing, reviewi
 - **YAGNI with discipline** -- avoid speculative abstractions, but design clear seams and invariants
 - **Prefer fakes over mocks** -- tests should validate behavior with realistic substitutes
 - **Document "why", not "what"** -- comments explain intent, invariants, and tradeoffs; code explains mechanics
+## Subagent Spawning Assumptions and Guidelines (MCP Context)
+
+When designing or executing workflows that spawn subagents under the MCP server runtime (e.g., in interactive developer environments like Claude Code or Firebender), the following cognitive and operational assumptions must be strictly followed:
+
+1. **Tier-3 Capabilities & Nesting Limits:**
+   - Most modern client harnesses support Tier-3 delegation (where subagents have access to WorkRail MCP tools).
+   - However, harnesses **may not support nested spawning** (subagents spawning their own subagents). Therefore, any subagent spawned to run a workflow/routine must be self-sufficient and must not rely on launching child subagents.
+   - *Static Nesting Verification:* The registry validator recursively analyzes transition graphs to detect and flag multi-level parallel nesting configurations based on the harness depth limit.
+
+2. **Availability & Subagent Dispatching:**
+   - Before requesting any specialized subagent, the system or main agent **must verify its availability** (e.g., via diagnostic environment checks).
+   - *Explicit Routine Wrapping:* To maintain compile-time type safety and DAG determinism, we strictly prohibit loose, untyped ad-hoc spawns. Any general/vanilla cognitive subtask must be explicitly wrapped in a lightweight, single-step Routine in the workflow registry, executing through the universal `workrail-executor`.
+
+3. **Cognitive Handoff & Anti-Bias Discipline:**
+   - Subagents do not automatically inherit conversation history or project context from the parent session. 
+   - Handoff instructions must be highly thorough, complete, and self-contained (using explicit **Context Packets**).
+   - **Zero Injected Bias:** Instructions must strictly avoid passing leading prompts, pre-emptive conclusions, or confirmation bias. Subagents must remain objective cognitive units.
+   - *Enforcement:* This is structurally enforced by restricting transferred keys to declared `contextMapping` boundaries, and cognitively enforced by systematic feature-level instructions (via `wr.features.subagent_guidance`) instructing the parent to only map raw, objective requirements, codebase slices, and target specs.
+
+4. **Claim Handoff & Non-Negotiable Verification:**
+   - Treat all subagent outputs strictly as *evidence*, not as truth or authority.
+   - Every claim, outcome, or recommendation returned by a subagent must be explicitly verified and categorized as `Confirmed`, `Plausible`, or `Rejected` by the parent agent before advancing.
+   - *Auto-Injected Synthesis Steps:* To ensure authors do not have to manually repeat verification steps, the compiler automatically injects a virtual `SynthesisStep` immediately following any parallel step in the Compiled DAG. Authors can customize the synthesis prompt/rubric directly inside the parallel step schema, while the engine guarantees the structured claim-adoption pattern is applied.
+
+5. **Executor Polymorphism & Model Selection:**
+   - *Polymorphic Handoff Strategy:* The engine supports both: (a) passing dynamic model selection parameters if the harness allows it, and (b) falling back to model-specific subagent variants (e.g., `workrail-executor-sonnet`) registered during the setup phase if the harness doesn't support model selection.
+   - *Setup Optimization:* The initial setup workflow diagnoses harness capabilities once and caches them in `.workrail/config.json`. For subsequent sessions, if the required executor version/model configuration is already cached, the engine bypasses the setup steps entirely to optimize the developer loop.
 
 ## Things to avoid
 

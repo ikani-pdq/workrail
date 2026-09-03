@@ -1,61 +1,79 @@
-# Design Review: GateKind Discriminated Union
+# Design Review Findings: Cognitive Benchmark Methodology Redesign
 
-## Tradeoff Review
+This document summarizes the design review findings, tradeoff evaluations, failure modes, and philosophy alignment for the selected Hybrid Benchmark architecture.
 
-| Tradeoff | Acceptable? | Failure condition | Hidden assumption |
-|----------|-------------|-------------------|-------------------|
-| 'confirmation_required' legacy literal maps to coordinator_eval | Yes | No test fixtures encode it; replay path already handles arbitrary gateKind values | No production sessions need different routing after the change |
-| RenderedStep.gateKind is optional | Yes | Accepted: only meaningful when requireConfirmation is true; advance core reads it only inside the gate path | Developer adds a third gate kind and forgets to set it on RenderedStep -- caught by assertNever at TriggerRouter level |
-| gateKind not in crash recovery sidecar | Yes (non-blocking) | Startup recovery already discards gate-parked sessions -- sidecar gap is irrelevant for this PR | Future crash-recovery for gate-parked sessions will need sidecar extension (filed as follow-up) |
+---
 
-## Failure Mode Review
+## 1. Tradeoff Review
 
-| Failure mode | Handled? | Risk |
-|-------------|----------|------|
-| gateKind missing from TerminalSignal.gate_parked | **Fixed in this PR** -- add to type, onGateParked callback, setTerminalSignal, buildSessionResult | Was blocking without fix |
-| assertNever becomes stale on third gate kind | Handled by design -- compile error forces update | Zero risk |
-| human_approval gate fires in MCP session | Non-issue -- gate path requires is_autonomous:'true', MCP sessions never set it | Zero risk |
-| gateKind missing from crash recovery sidecar | Non-blocking -- startup recovery discards gate_parked sessions, doesn't resume them | Follow-up ticket |
+We evaluated three key tradeoffs accepted in the hybrid design:
+1. **In-Process Virtual Duplex Loopback**: Emulates stdio boundaries in Node memory to run in <10ms. 
+   - *Status*: Valid under standard conditions. 
+   - *Risk*: Bypasses OS-level shebang and argv parsing during core sweeps.
+2. **AST Gating & Write-Protected Overlays**: Restricts imports and copies protected test files to prevent cheating.
+   - *Status*: Valid. Saves container setup times.
+   - *Risk*: Vulnerable if the model executes shell escapes (e.g., `child_process.exec`) that bypass overlay directories.
+3. **Wald's SPRT Sequential Analysis**: Early-stopping to bound API billing.
+   - *Status*: Valid. Saves up to 80% in token cost.
+   - *Risk*: Violates the i.i.d. assumption due to prompt caching and correlated model seeds, which may skew boundary thresholds.
 
-## Runner-Up / Simpler Alternative Review
+---
 
-No viable runner-up. Context-variable approach ruled out by explicit user decision (coupling infra into workflow violates philosophy). No simpler design exists that keeps gateKind as typed first-class data -- any simplification would require TriggerRouter to string-parse the snapshot, violating the typed-contracts constraint.
+## 2. Failure Mode Review
 
-## Philosophy Alignment
+We audited the four primary failure modes:
+- **Wald's SPRT Non-Convergence (Medium Severity)**: Wald's SPRT sequential analysis might loop indefinitely if distributions are highly non-normal or bimodal.
+- **AST False Negatives (Low-Medium Severity)**: Strict import rules could block valid modern ES module code configurations.
+- **Sandbox Escape via Shell Injection (High Severity - Most Dangerous)**: A model could run arbitrary shell commands to compromise the host process.
+- **Token Budget Exhaustion (Medium Severity)**: Running deep multi-step workflows could lead to token cost spikes during debugging.
 
-| Principle | Status |
-|-----------|--------|
-| Make illegal states unrepresentable | Satisfied -- GateKind is a union literal, invalid values unrepresentable |
-| Exhaustiveness everywhere | Satisfied -- assertNever in TriggerRouter |
-| Zero LLM turns for routing | Satisfied -- TriggerRouter switch is pure TypeScript |
-| Typed contracts at phase boundaries | Satisfied -- WorkflowRunGateParked carries typed gateKind |
-| Functional core / imperative shell | Satisfied -- workflow declares intent; TriggerRouter routes |
-| Validate at boundaries, trust inside | Satisfied -- validated at schema compile, trusted downstream |
+---
 
-## Findings
+## 3. Runner-Up & Simpler Alternative Review
 
-### No RED findings.
+- **Strengths Borrowed from Candidate 1**: The prompt-equalized concatenated control arm and Wald SPRT sequential analysis are layered on top of Candidate 2's secure virtual loopback.
+- **Simpler Alternative (Direct Vitest testing of JS handlers)**: Insufficient because it does not verify transport-level JSON-RPC serialization, EPIPE socket failures, or input/output schema parsing, and cannot prevent model cheating.
 
-### ORANGE
-**O1: out.gateKind exists in continue-workflow.ts:324 but is not passed to onGateParked() or stored in TerminalSignal.**
-This is the central gap. Without fixing it, `WorkflowRunGateParked.gateKind` will always be missing and TriggerRouter cannot route. Must be fixed in this PR. Specific locations:
-- `src/daemon/state/terminal-signal.ts:36` -- add `gateKind: GateKind` to `gate_parked` variant
-- `src/daemon/tools/continue-workflow.ts:91` and `322` -- pass `out.gateKind` to `onGateParked()`
-- `src/daemon/core/session-result.ts:141-150` -- read `signal.gateKind` into `WorkflowRunGateParked`
+---
 
-### YELLOW
-**Y1: gateKind not in crash recovery gate sidecar** -- follow-up ticket, non-blocking.
-**Y2: RenderedStep.gateKind is optional** -- acceptable tension, TypeScript limitation, not a correctness risk.
-**Y3: spec/authoring-spec.json and validate:authoring-spec must be updated** -- mandatory but mechanical.
+## 4. Philosophy Alignment
 
-## Recommended Revisions
+- **Satisfied Principles**:
+  - *Three separate systems -- do not conflate them*: The runner is decoupled from the Console dashboard, logging results to disk.
+  - *Zero LLM turns for routing*: Step transitions and control arms run programmatically via TypeScript coordinator logic.
+  - *Prefer fakes over mocks*: Uses memory duplex stream loopback fakes rather than spy mocks.
+  - *Errors as data*: Graded checkpoints (compile, syntax, tests) are mapped to fractional score components (0.0 to 1.0) rather than exceptions.
+- **Tensions**:
+  - *Environmental Hermeticism vs. YAGNI*: Balanced by using in-process loopbacks with AST gatekeepers and overlays for local runs, reserving containers for CI.
+  - *Task Realism vs. Local Velocity*: Balanced by designing micro-scoped multi-file workspaces that execute in <1s.
 
-1. **Fix O1 before any other code** -- the gate kind chain is broken without it.
-2. Add `GateKind = 'coordinator_eval' | 'human_approval'` as a named export from `src/v2/durable-core/constants.ts` (alongside EVENT_KIND).
-3. Update `spec/authoring-spec.json` with a rule covering the new `requireConfirmation` object form.
-4. Update `wr.mr-review` phase-6: `requireConfirmation: { "kind": "human_approval" }`.
+---
 
-## Residual Concerns
+## 5. Audit Findings
 
-- The `complete_step` tool (makeCompleteStepTool) may also have an `onGateParked` callback path -- verify it handles gateKind the same way as `continue_workflow`.
-- The authoring spec change requires `npm run validate:authoring-spec` and `npm run validate:feature-coverage` to pass before the PR can merge.
+### [ORANGE] Finding 1: Shell Escape vulnerability in bare-metal in-process loopbacks
+- *Description*: Running generated code locally without virtualization exposes the host process to shell injection or file deletion if the agent uses dynamic property access to invoke execution commands.
+- *Severity*: Moderate-High.
+
+### [ORANGE] Finding 2: SPRT i.i.d. assumption violation due to prompt caching
+- *Description*: LLM trials are non-independent due to prompt caching, shared seeds, and correlated error states, which violates Wald SPRT assumptions and can cause boundary decision errors.
+- *Severity*: Moderate.
+
+### [YELLOW] Finding 3: AST parser false negatives on ES module formatting
+- *Description*: TS Compiler API matching may fail on complex re-exports or dynamic imports, causing valid developer solutions to fail grading.
+- *Severity*: Low.
+
+---
+
+## 6. Recommended Revisions
+
+1. **SPRT Safe Termination Safeguard**: Implement a hard maximum trial limit (e.g. `--max-trials=100`) in the runner. If reached, fallback to standard OLS/LMM analysis and log a non-convergence warning.
+2. **AST Execution Hardening**: Hardcheck the AST gatekeeper to scan for dynamic executions (e.g. `eval`, `Function`, `child_process.exec`, `spawn`, `module.constructor`) and restrict modifications to package dependencies.
+3. **Non-Privileged Local Runs**: Enforce that local benchmark runs run as a non-privileged system user, and integrate Docker/gVisor sandboxing in the nightly CI regression pipeline.
+
+---
+
+## 7. Residual Concerns
+
+- We cannot guarantee 100% security against zero-day Node/OS exploits if a rogue agent escapes the AST gatekeeper during bare-metal local execution.
+- Collinearity in regression analysis under Concatenated prompt budgets may introduce modeling noise due to non-linear context degradation in modern LLMs.
