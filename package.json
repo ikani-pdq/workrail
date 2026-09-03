@@ -3,6 +3,7 @@
   "version": "3.101.1",
   "description": "Personal hardened fork of WorkRail (step-by-step workflow enforcement for AI agents via MCP)",
   "license": "MIT",
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ikani-pdq/workrail.git"
@@ -11,9 +12,6 @@
     "url": "https://github.com/ikani-pdq/workrail/issues"
   },
   "homepage": "https://github.com/ikani-pdq/workrail#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "bin": {
     "workrail": "dist/cli-workrail.js",
     "worktrain": "dist/cli-worktrain.js"

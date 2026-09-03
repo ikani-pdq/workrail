@@ -134,9 +134,10 @@ Releases are automated by semantic-release on merge to `main`:
 | `docs`, `chore`, `refactor`, `test`, `build`, `ci`, `style` | no release |
 | Breaking change | minor (default) or major (`WORKRAIL_ALLOW_MAJOR_RELEASE=true`) |
 
-The release job publishes to the public npm registry. It reads
-`NODE_AUTH_TOKEN` from the `NPM_TOKEN` repo secret -- add an Automation-type
-token from npmjs.org to the repo secrets before the first release. The
+The release job does not publish to any package registry -- `package.json` is
+`"private": true` and this fork is install-from-source only (see the README's
+Install section). The release job produces a version bump, changelog, and a
+tagged GitHub Release; that tag is the pinned artifact to install from. The
 `WORKRAIL_USE_RELEASE_APP` repo variable controls whether the
 upstream-style GitHub-App push flow is also wired up; leave it unset to
 admin-merge version bumps by hand.
@@ -149,7 +150,7 @@ Background:
 
 Pulling local changes into Claude Code: if you are using the HTTP dev loop,
 the watch + dev:mcp:watch terminals do this automatically (recompile,
-restart, ~5-10 second cycle). For a binary you have installed via
-`npm install -g @ikani.samani/workrail`, you need to rebuild and re-pack to
-test the published shape -- usually not worth doing locally; rely on CI for
-the release shape.
+restart, ~5-10 second cycle). For a binary installed via the README's
+`npm pack` + `npm install -g` tarball flow, you need to rebuild, re-pack, and
+reinstall the tarball to pick up changes -- usually not worth doing locally;
+rely on CI for the release shape.

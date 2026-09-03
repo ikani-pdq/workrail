@@ -24,9 +24,11 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
-      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1.
       # corepack reads the packageManager field from package.json and activates
       # the correct npm version, reliably shadowing the bundled npm in PATH.
+      # (Kept in sync with the real release job even though this fork no
+      # longer publishes to a registry, so `npm ci`/`npm install` behavior
+      # matches exactly between dry-run and real releases.)
       - name: Activate npm (corepack reads packageManager from package.json)
         run: corepack enable npm && corepack prepare --activate
 
