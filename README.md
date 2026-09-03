@@ -304,15 +304,16 @@ inline guidance.
 the workflow trust model (workflow JSON is trusted code; the workflow repo
 must be reviewed like production source), network exposure (MCP HTTP
 transport binds loopback by default; `WORKRAIL_HTTP_HOST` overrides it and
-logs a warning), and filesystem permissions (`~/.workrail/` is mode `0o700`).
+non-loopback values refuse to start), and filesystem permissions
+(`~/.workrail/` is mode `0o700`).
 
 Two rules worth lifting to the front:
 
 - Do not sync `~/.workrail/` to consumer cloud storage (Dropbox, iCloud
   Drive, Google Drive, OneDrive). Your HMAC signing keyring lives there.
-- Do not set `WORKRAIL_HTTP_HOST` to anything other than a loopback address
-  unless you have an authenticated reverse proxy in front of WorkRail. The
-  MCP endpoint has no built-in authentication.
+- Do not set `WORKRAIL_HTTP_HOST` to anything other than a loopback address.
+  The MCP endpoint has no built-in authentication, so WorkRail refuses to
+  start rather than bind beyond loopback -- there is no override flag.
 
 ## Developing on the fork
 
