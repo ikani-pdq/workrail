@@ -89,23 +89,40 @@ describe('startHttpServer loopback enforcement', () => {
 
   it('starts normally with the default loopback host (no WORKRAIL_HTTP_HOST set)', async () => {
     const { startHttpServer } = await import('../../../src/mcp/transports/http-entry.js');
+    const { composeServer } = await import('../../../src/mcp/server.js');
     await expect(startHttpServer(0)).resolves.toBeUndefined();
     expect(process.exit).not.toHaveBeenCalled();
+    // Pins the ordering fix: composeServer() must run on the happy path.
+    expect(composeServer).toHaveBeenCalledTimes(1);
   });
 
   it('starts normally with an explicit loopback host', async () => {
     process.env.WORKRAIL_HTTP_HOST = '127.0.0.1';
     const { startHttpServer } = await import('../../../src/mcp/transports/http-entry.js');
+    const { composeServer } = await import('../../../src/mcp/server.js');
     await expect(startHttpServer(0)).resolves.toBeUndefined();
     expect(process.exit).not.toHaveBeenCalled();
+    expect(composeServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a case-varied loopback spelling as loopback, not a refusal', async () => {
+    process.env.WORKRAIL_HTTP_HOST = 'LOCALHOST';
+    const { startHttpServer } = await import('../../../src/mcp/transports/http-entry.js');
+    const { composeServer } = await import('../../../src/mcp/server.js');
+    await expect(startHttpServer(0)).resolves.toBeUndefined();
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(composeServer).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to start on a non-loopback host', async () => {
     process.env.WORKRAIL_HTTP_HOST = '0.0.0.0';
     const { startHttpServer } = await import('../../../src/mcp/transports/http-entry.js');
+    const { composeServer } = await import('../../../src/mcp/server.js');
     await expect(startHttpServer(0)).rejects.toThrow('process.exit(1)');
     expect(process.stderr.write).toHaveBeenCalledWith(
       expect.stringContaining('WORKRAIL_HTTP_HOST=0.0.0.0'),
     );
+    // Pins the ordering fix: composeServer() must be skipped on a rejected host.
+    expect(composeServer).not.toHaveBeenCalled();
   });
 });

@@ -33,6 +33,14 @@ import { join } from 'path';
 
 export type TransportKind = 'stdio' | 'http' | 'bridge';
 
+/** 'crash' (default): an unexpected fault (uncaughtException/unhandledRejection) --
+ *  may be transient, a supervisor retry could succeed. 'config': a validated,
+ *  permanent condition (e.g. a rejected startup config) -- retrying without a
+ *  config change will fail identically every time. Distinguishing the two in
+ *  the crash log lets a supervisor or `worktrain diagnose` tell them apart
+ *  instead of treating every fatalExit() the same way. */
+export type FatalExitKind = 'crash' | 'config';
+
 // ---------------------------------------------------------------------------
 // Module-level state — intentionally mutable (last-resort handlers)
 //
@@ -68,7 +76,7 @@ const CRASH_LOG_MAX_BYTES = 512 * 1024; // 512 KB — rotate at this size
  * Uses sync I/O so it completes before process.exit(1) is called.
  * Silently no-ops if the write fails — we're already crashing.
  */
-function writeCrashLog(label: string, reason: unknown): void {
+function writeCrashLog(label: string, reason: unknown, kind: FatalExitKind): void {
   try {
     mkdirSync(join(homedir(), '.workrail'), { recursive: true, mode: 0o700 });
 
@@ -91,6 +99,7 @@ function writeCrashLog(label: string, reason: unknown): void {
       transport: registeredTransport ?? 'unknown',
       uptimeMs: Date.now() - startedAtMs,
       label,
+      kind,
       message: reason instanceof Error ? reason.message : String(reason),
       stack: reason instanceof Error ? (reason.stack ?? null) : null,
     };
@@ -151,14 +160,17 @@ export function registerGracefulShutdown(
  * If a graceful shutdown function has been registered via registerGracefulShutdown(),
  * it is called before exit with a hard timeout. The sync crash log write and
  * stderr write always happen first — they survive even if the async path hangs.
+ *
+ * @param kind  'crash' (default) for an unexpected fault, 'config' for a
+ *              validated, permanent startup-config rejection. See FatalExitKind.
  */
-export function fatalExit(label: string, reason: unknown): void {
+export function fatalExit(label: string, reason: unknown, kind: FatalExitKind = 'crash'): void {
   if (fatalHandlerActive.value) return;
   fatalHandlerActive.value = true;
 
   // Sync writes first — these must complete before any async work begins.
   // They survive process death even if the graceful shutdown path hangs.
-  writeCrashLog(label, reason);
+  writeCrashLog(label, reason, kind);
 
   try {
     process.stderr.write(`[MCP] ${label}: ${formatFatal(reason)}\n`);

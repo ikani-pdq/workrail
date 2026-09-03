@@ -36,7 +36,11 @@ export async function startHttpServer(port: number): Promise<void> {
   // full server composition, and refused outright rather than just warned —
   // there is no authentication layer to fall back on.
   const host = (process.env.WORKRAIL_HTTP_HOST ?? DEFAULT_BIND_HOST).trim() || DEFAULT_BIND_HOST;
-  if (!LOOPBACK_HOSTS.has(host)) {
+  // Case-insensitive: a benign spelling variant (e.g. "LOCALHOST") is still
+  // loopback intent and must not hit the same hard-refusal path as a genuine
+  // non-loopback host. The original `host` (not lowercased) is what actually
+  // gets bound below, so this only relaxes the *check*.
+  if (!LOOPBACK_HOSTS.has(host.toLowerCase())) {
     fatalExit(
       'Non-loopback HTTP bind refused',
       new Error(
@@ -45,6 +49,7 @@ export async function startHttpServer(port: number): Promise<void> {
         `could call MCP tools as you. Set WORKRAIL_HTTP_HOST=127.0.0.1 (default) ` +
         `unless you have an external authentication layer in front.`
       ),
+      'config',
     );
     // fatalExit() calls process.exit(1); this return only matters if fatalExit()
     // no-oped because its re-entrancy guard was already tripped by an earlier
