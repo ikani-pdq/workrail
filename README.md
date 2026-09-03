@@ -181,9 +181,11 @@ they checkpoint. No context-switching overhead — each session has its own comp
 
 This is a personal hardened fork of [WorkRail](https://github.com/EtienneBBeaulac/workrail),
 a step-by-step workflow enforcement engine for AI agents delivered as an MCP
-server. The package also publishes to the npm registry as
-`@ikani.samani/workrail`, but the registry is not a trusted install source --
-build and install locally instead (see [Install](#install) below).
+server. `package.json` is `private: true` -- this fork is **not published to
+the npm registry**. Build and install locally instead (see
+[Install](#install) below); do not `npm install` or `npx` any
+`@ikani.samani/workrail` version, published or otherwise, as an install path
+for this fork.
 
 If you want the upstream public version, install `@exaudeus/workrail` from
 npmjs.org instead.
