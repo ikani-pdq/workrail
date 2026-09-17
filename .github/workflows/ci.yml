@@ -260,18 +260,26 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Run security audit
+      - name: Install console dependencies
+        run: npm install --ignore-scripts
+        working-directory: console
+
+      - name: Run security audit (root)
+        run: npm audit --audit-level=high
+
+      - name: Run security audit (console/)
+        run: npm audit --audit-level=high
+        working-directory: console
+
+      - name: Security audit summary
+        if: success()
         run: |
           echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          npm audit --audit-level=high 2>&1 | tee audit-results.txt
-          if grep -q "found 0 vulnerabilities" audit-results.txt; then
-            echo "No high/critical vulnerabilities found." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "High or critical vulnerabilities detected -- merge blocked." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "No high/critical vulnerabilities found (root and console/)." >> $GITHUB_STEP_SUMMARY
 
       - name: Generate SBOM
+        if: ${{ !cancelled() }}
         run: |
           echo "## SBOM" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -280,6 +288,7 @@ jobs:
           echo "Generated CycloneDX SBOM with ${COMPONENT_COUNT} components (see workflow artifacts)." >> $GITHUB_STEP_SUMMARY
 
       - name: Upload SBOM artifact
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sbom
