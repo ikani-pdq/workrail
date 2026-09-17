@@ -55,11 +55,14 @@ Creates `~/.workrail/config.json` with all supported keys commented out and thei
 
 ## Quick Start
 
-For most users, no configuration is needed. Install locally first (see the
+For most users, no configuration is needed. `ikani-pdq/workrail` is the sole
+canonical source for this fork -- install locally from it first (see the
 README's [Install](../README.md#install) section -- `git clone` -> `npm run
-build` -> `npm pack` -> `npm install -g` the tarball). Do not use `npx
-@ikani.samani/workrail`: this fork does not publish to the npm registry, and
-an unpinned `npx`/`@latest` install is not a trusted source for it.
+build` -> `npm pack` -> `npm install -g` the tarball). Do not install this
+fork via `npx` or `npm install` from the public npm registry: a
+remotely-published copy of this project exists there via a personal upstream
+fork, but it is not security-hardened to this repository's standards and must
+not be used for company work.
 
 Then add WorkRail to your MCP client, pointing at the locally installed
 binary directly:
@@ -68,11 +71,16 @@ binary directly:
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
     }
   }
 }
 ```
+
+`PINNED` should match the version you just built and installed -- update it
+each time you `git pull` and reinstall. The server refuses to start rather
+than silently running a stale build if the two don't match.
 
 ---
 
@@ -122,7 +130,8 @@ Load workflows from GitHub, GitLab, Bitbucket, or any Git repository.
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail",
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"],
       "env": {
         "WORKFLOW_GIT_REPOS": "https://github.com/your-org/workflows.git",
         "GITHUB_TOKEN": "ghp_xxxx"
@@ -276,7 +285,8 @@ Logs go to **stderr** (stdout is reserved for MCP protocol).
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail",
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"],
       "env": {
         "WORKRAIL_LOG_LEVEL": "INFO"
       }
@@ -331,7 +341,8 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) 
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
     }
   }
 }
@@ -354,7 +365,8 @@ This creates/updates `.claude.json` in your project root. To configure environme
       "mcpServers": {
         "workrail": {
           "type": "stdio",
-          "command": "workrail",
+          "command": "bash",
+          "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"],
           "env": {
             "WORKFLOW_STORAGE_PATH": "/path/to/custom/workflows"
           }
@@ -420,7 +432,8 @@ File: `.cursor/mcp.json` in your project
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail",
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"],
       "cwd": "/path/to/your/project"
     }
   }
@@ -433,7 +446,8 @@ File: `.cursor/mcp.json` in your project
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail",
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"],
       "env": {
         "WORKFLOW_STORAGE_PATH": "/path/to/custom/workflows",
         "WORKFLOW_GIT_REPOS": "https://github.com/team/workflows.git",

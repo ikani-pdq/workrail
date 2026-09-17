@@ -181,11 +181,17 @@ they checkpoint. No context-switching overhead — each session has its own comp
 
 This is a personal hardened fork of [WorkRail](https://github.com/EtienneBBeaulac/workrail),
 a step-by-step workflow enforcement engine for AI agents delivered as an MCP
-server. `package.json` is `private: true` -- this fork is **not published to
-the npm registry**. Build and install locally instead (see
-[Install](#install) below); do not `npm install` or `npx` any
-`@ikani.samani/workrail` version, published or otherwise, as an install path
-for this fork.
+server. **`ikani-pdq/workrail` (this repository) is the sole canonical source
+for this fork.** `package.json` is `private: true` -- this repository does not
+publish to the npm registry. Build and install locally instead (see
+[Install](#install) below).
+
+**Do not install this fork via `npm install` or `npx` from the public npm
+registry.** A remotely-published copy of this project exists there via a
+personal upstream fork, but it is not security-hardened to this repository's
+standards (no confirmed CI-enforced dependency audit or SBOM generation) and
+must not be used for company work. Only a local build from this repository is
+approved.
 
 If you want the upstream public version, install `@exaudeus/workrail` from
 npmjs.org instead.
@@ -237,8 +243,11 @@ Desktop, Cursor, Firebender, etc.) at it. Pick the section that matches your
 client.
 
 Since the [Install](#install) step above installs `workrail` globally from
-your local build, every client just needs to reference the binary directly
--- no `npx`, and no registry fetch at runtime.
+your local build, every client's config pins and verifies that exact
+installed version before launching it -- no `npx`, and no registry fetch at
+runtime. If the installed version doesn't match the pinned one (e.g. you
+forgot to reinstall after `git pull`), the server refuses to start and tells
+you how to fix it instead of silently running the wrong build.
 
 ### Claude Code CLI
 
@@ -248,13 +257,17 @@ Add the server to `~/.claude.json` (or a project-local `.mcp.json`):
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
     }
   }
 }
 ```
 
-This launches WorkRail over stdio whenever Claude Code starts.
+Update `PINNED` to match the version you just built and installed (the
+`ikani.samani-workrail-<version>.tgz` filename from the Install step above
+tells you the current one). This launches WorkRail over stdio whenever Claude
+Code starts, after confirming the installed build matches.
 
 ### Claude Desktop
 
@@ -265,7 +278,8 @@ docs):
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
     }
   }
 }
