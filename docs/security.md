@@ -82,6 +82,32 @@ The console renders every session's prompts, outputs, and pasted inputs. It is
 intentionally not configurable beyond loopback. If you need a remote view of
 session state, run the console over an SSH tunnel rather than rebinding it.
 
+## Package provenance check
+
+`ikani-pdq/workrail` never publishes to any package registry (see
+[ADR-011](adrs/011-distribution-model.md)), but a separate fork
+(`iconza98/workrail`) publishes releases to public npm under a name this
+repo previously used (`@ikani.samani/workrail`), with npm provenance
+attesting to that other repository, not this one. Installing that name via
+`npm install` or an unpinned `npx`/`@latest` runs code this repo's security
+review has not covered.
+
+On every start, the MCP server (`src/mcp-server.ts`) reads its own running
+`package.json` and refuses to start unless the `repository.url` field points
+at `github.com/ikani-pdq/workrail` (`src/runtime/verify-package-provenance.ts`).
+This catches a mismatched install regardless of how it was obtained -- global
+install, tarball, or otherwise -- because the check runs against whatever
+`package.json` the running process actually has, not the name or version it
+was installed under. Like `WORKRAIL_HTTP_HOST`, there is no override flag:
+the fix for a failed check is reinstalling from
+[the canonical repository](https://github.com/ikani-pdq/workrail), not
+bypassing the check.
+
+This is defense in depth, not a substitute for installing correctly in the
+first place -- follow the README's [Install](../README.md#install) section
+and pin the exact version in `.mcp.json` via
+`scripts/mcp-workrail-guard.sh` rather than relying on this check alone.
+
 ## Filesystem layout and permissions
 
 WorkRail stores all per-user state under `~/.workrail/`:
