@@ -7,20 +7,22 @@
 # repo does not publish to npm, so the only trusted install path is a local
 # `npm pack && npm install -g` from this checkout.
 #
-# The pinned version is read from package.json directly, not hardcoded, so
-# it never drifts out of sync after a version bump -- rebuild, reinstall,
-# nothing else to update.
+# The pinned version and package name are both read from package.json
+# directly, not hardcoded, so neither drifts out of sync after a version
+# bump or a package rename -- rebuild, reinstall, nothing else to update.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+PKG_NAME="$(node -p "require('$PROJECT_ROOT/package.json').name")"
 PINNED="$(node -p "require('$PROJECT_ROOT/package.json').version")"
-INSTALLED="$(node -p "require('$(npm root -g)/@ikani.samani/workrail/package.json').version" 2>/dev/null || true)"
+INSTALLED="$(node -p "require('$(npm root -g)/$PKG_NAME/package.json').version" 2>/dev/null || true)"
 
 if [ "$INSTALLED" != "$PINNED" ]; then
-  echo "workrail: pinned version $PINNED not found (installed: ${INSTALLED:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz" >&2
+  TARBALL_PREFIX="$(echo "$PKG_NAME" | sed -e 's#^@##' -e 's#/#-#' -e 's/\./-/g')"
+  echo "workrail: pinned version $PINNED not found (installed: ${INSTALLED:-none}). Reinstall: npm pack && npm install -g ./${TARBALL_PREFIX}-$PINNED.tgz" >&2
   exit 1
 fi
 

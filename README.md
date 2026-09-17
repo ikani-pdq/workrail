@@ -181,9 +181,9 @@ they checkpoint. No context-switching overhead — each session has its own comp
 This is a personal hardened fork of [WorkRail](https://github.com/EtienneBBeaulac/workrail),
 a step-by-step workflow enforcement engine for AI agents delivered as an MCP
 server. **`ikani-pdq/workrail` (this repository) is the sole canonical source
-for this fork.** `package.json` is `private: true` -- this repository does not
-publish to the npm registry. Build and install locally instead (see
-[Install](#install) below).
+for this fork.** `package.json` names this fork `@ikani-pdq/workrail` and is
+`private: true` -- this repository does not publish to the npm registry.
+Build and install locally instead (see [Install](#install) below).
 
 **Do not install this fork via `npm install` or `npx` from the public npm
 registry.** A remotely-published copy of this project (`@ikani.samani/workrail`)
@@ -217,11 +217,11 @@ cd workrail
 npm install
 npm run build
 npm pack
-npm install -g ./ikani.samani-workrail-*.tgz
+npm install -g ./ikani-pdq-workrail-*.tgz
 ```
 
 `npm pack` writes a tarball named `<scope>-<name>-<version>.tgz` (dots in the
-scope become dashes), e.g. `ikani.samani-workrail-3.101.1.tgz` — run `ls
+scope become dashes), e.g. `ikani-pdq-workrail-3.101.1.tgz` — run `ls
 *.tgz` if the glob above doesn't match. No `.npmrc` configuration,
 authentication token, or registry access is needed.
 
