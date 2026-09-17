@@ -21,7 +21,10 @@ PINNED="$(node -p "require('$PROJECT_ROOT/package.json').version")"
 INSTALLED="$(node -p "require('$(npm root -g)/$PKG_NAME/package.json').version" 2>/dev/null || true)"
 
 if [ "$INSTALLED" != "$PINNED" ]; then
-  TARBALL_PREFIX="$(echo "$PKG_NAME" | sed -e 's#^@##' -e 's#/#-#' -e 's/\./-/g')"
+  # npm pack's tarball prefix strips the leading "@" and turns "/" into "-",
+  # but leaves any dots in the scope/name alone (verified against actual
+  # `npm pack` output -- it does NOT collapse dots to dashes).
+  TARBALL_PREFIX="$(echo "$PKG_NAME" | sed -e 's#^@##' -e 's#/#-#')"
   echo "workrail: pinned version $PINNED not found (installed: ${INSTALLED:-none}). Reinstall: npm pack && npm install -g ./${TARBALL_PREFIX}-$PINNED.tgz" >&2
   exit 1
 fi

@@ -220,8 +220,9 @@ npm pack
 npm install -g ./ikani-pdq-workrail-*.tgz
 ```
 
-`npm pack` writes a tarball named `<scope>-<name>-<version>.tgz` (dots in the
-scope become dashes), e.g. `ikani-pdq-workrail-3.101.1.tgz` — run `ls
+`npm pack` writes a tarball named `<scope>-<name>-<version>.tgz` (the leading
+`@` is dropped and `/` becomes `-`; dots are left as-is), e.g.
+`ikani-pdq-workrail-3.101.1.tgz` — run `ls
 *.tgz` if the glob above doesn't match. No `.npmrc` configuration,
 authentication token, or registry access is needed.
 
