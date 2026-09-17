@@ -7,6 +7,10 @@
     "workrail-dev": {
       "type": "http",
       "url": "http://localhost:3100/mcp"
+    },
+    "workrail": {
+      "command": "bash",
+      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
     }
   }
 }
