@@ -243,11 +243,17 @@ Desktop, Cursor, Firebender, etc.) at it. Pick the section that matches your
 client.
 
 Since the [Install](#install) step above installs `workrail` globally from
-your local build, every client's config pins and verifies that exact
-installed version before launching it -- no `npx`, and no registry fetch at
-runtime. If the installed version doesn't match the pinned one (e.g. you
-forgot to reinstall after `git pull`), the server refuses to start and tells
-you how to fix it instead of silently running the wrong build.
+your local build, every client's config runs it through
+`scripts/mcp-workrail-guard.sh`, which pins and verifies that exact installed
+version before launching it -- no `npx`, and no registry fetch at runtime. If
+the installed version doesn't match this checkout's own `package.json`
+version (e.g. you forgot to reinstall after `git pull`), the server refuses
+to start and tells you how to fix it instead of silently running the wrong
+build. The pinned version is read from `package.json` automatically, so
+there's nothing to manually keep in sync after a version bump.
+
+Every example below uses `/path/to/your/workrail` as a placeholder --
+replace it with wherever you cloned this repository.
 
 ### Claude Code CLI
 
@@ -258,16 +264,15 @@ Add the server to `~/.claude.json` (or a project-local `.mcp.json`):
   "mcpServers": {
     "workrail": {
       "command": "bash",
-      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
 ```
 
-Update `PINNED` to match the version you just built and installed (the
-`ikani.samani-workrail-<version>.tgz` filename from the Install step above
-tells you the current one). This launches WorkRail over stdio whenever Claude
-Code starts, after confirming the installed build matches.
+This launches WorkRail over stdio whenever Claude Code starts, after
+confirming the installed build matches this checkout's `package.json`
+version.
 
 ### Claude Desktop
 
@@ -279,7 +284,7 @@ docs):
   "mcpServers": {
     "workrail": {
       "command": "bash",
-      "args": ["-c", "PINNED=3.101.1; v=$(node -p \"require('$(npm root -g)/@ikani.samani/workrail/package.json').version\" 2>/dev/null); if [ \"$v\" != \"$PINNED\" ]; then echo \"workrail: pinned version $PINNED not found (installed: ${v:-none}). Reinstall: npm pack && npm install -g ./ikani.samani-workrail-$PINNED.tgz\" >&2; exit 1; fi; exec workrail"]
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
