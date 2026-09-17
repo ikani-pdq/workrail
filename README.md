@@ -181,11 +181,17 @@ they checkpoint. No context-switching overhead — each session has its own comp
 
 This is a personal hardened fork of [WorkRail](https://github.com/EtienneBBeaulac/workrail),
 a step-by-step workflow enforcement engine for AI agents delivered as an MCP
-server. `package.json` is `private: true` -- this fork is **not published to
-the npm registry**. Build and install locally instead (see
-[Install](#install) below); do not `npm install` or `npx` any
-`@ikani.samani/workrail` version, published or otherwise, as an install path
-for this fork.
+server. **`ikani-pdq/workrail` (this repository) is the sole canonical source
+for this fork.** `package.json` is `private: true` -- this repository does not
+publish to the npm registry. Build and install locally instead (see
+[Install](#install) below).
+
+**Do not install this fork via `npm install` or `npx` from the public npm
+registry.** A remotely-published copy of this project exists there via a
+personal upstream fork, but it is not security-hardened to this repository's
+standards (no confirmed CI-enforced dependency audit or SBOM generation) and
+must not be used for company work. Only a local build from this repository is
+approved.
 
 If you want the upstream public version, install `@exaudeus/workrail` from
 npmjs.org instead.
@@ -237,8 +243,17 @@ Desktop, Cursor, Firebender, etc.) at it. Pick the section that matches your
 client.
 
 Since the [Install](#install) step above installs `workrail` globally from
-your local build, every client just needs to reference the binary directly
--- no `npx`, and no registry fetch at runtime.
+your local build, every client's config runs it through
+`scripts/mcp-workrail-guard.sh`, which pins and verifies that exact installed
+version before launching it -- no `npx`, and no registry fetch at runtime. If
+the installed version doesn't match this checkout's own `package.json`
+version (e.g. you forgot to reinstall after `git pull`), the server refuses
+to start and tells you how to fix it instead of silently running the wrong
+build. The pinned version is read from `package.json` automatically, so
+there's nothing to manually keep in sync after a version bump.
+
+Every example below uses `/path/to/your/workrail` as a placeholder --
+replace it with wherever you cloned this repository.
 
 ### Claude Code CLI
 
@@ -248,13 +263,16 @@ Add the server to `~/.claude.json` (or a project-local `.mcp.json`):
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
 ```
 
-This launches WorkRail over stdio whenever Claude Code starts.
+This launches WorkRail over stdio whenever Claude Code starts, after
+confirming the installed build matches this checkout's `package.json`
+version.
 
 ### Claude Desktop
 
@@ -265,7 +283,8 @@ docs):
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }

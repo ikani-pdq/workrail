@@ -7,6 +7,10 @@
     "workrail-dev": {
       "type": "http",
       "url": "http://localhost:3100/mcp"
+    },
+    "workrail": {
+      "command": "bash",
+      "args": ["scripts/mcp-workrail-guard.sh"]
     }
   }
 }
