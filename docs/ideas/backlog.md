@@ -6641,3 +6641,18 @@ If auto-injected steps support delegating to subagents, the compiler can dynamic
 - How is the parallel step's synthesis step generated? When a subagent audit completes, a dynamic synthesis step must auto-adopt the subagent's claims/findings.
 - What context variables are mapped into the child audit session from the parent?
 - Supporting custom model selection for the delegated audit subagent.
+
+---
+
+### Unsanctioned npm package still published under this project's identity (September 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 8** | Cor:1 Cap:1 Eff:3 Lev:1 Con:2 | Blocked: no
+
+`@ikani.samani/workrail` is published to public npm from `iconza98/workrail` -- the maintainer's own prior personal fork/account, predating this hardened fork. It is not security-hardened to `ikani-pdq/workrail`'s standards. Its continued availability under this project's package name means someone could install it instead of building `ikani-pdq/workrail` from source, despite the README and [ADR-011](../adrs/011-distribution-model.md) advising against it. ADR-011 formalized local-install-only distribution but deliberately left this package published rather than committing to a cleanup timeline.
+
+**Things to hash out:**
+- Deprecate (`npm deprecate` with a warning message) vs. fully unpublish -- which is the right action, and does npm's unpublish window still apply?
+- Is there a concrete trigger (e.g. a report of someone actually installing it) that should reprioritize this above "not scheduled"?
+- Does this depend on anything else in ADR-011 (e.g. a PDQ-owned GitHub org), or is it a purely independent npm-account action?
