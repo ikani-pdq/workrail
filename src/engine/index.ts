@@ -2,7 +2,7 @@
  * WorkRail Library Engine — public entry point.
  *
  * Usage:
- *   import { createWorkRailEngine } from '@ikani.samani/workrail/engine';
+ *   import { createWorkRailEngine } from '@ikani-pdq/workrail/engine';
  *   const result = await createWorkRailEngine({ dataDir: '/tmp/workrail' });
  *   if (!result.ok) { console.error(result.error); return; }
  *   const engine = result.value;

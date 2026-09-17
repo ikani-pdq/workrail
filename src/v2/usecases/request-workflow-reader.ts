@@ -384,9 +384,11 @@ function shouldSkipDirectory(name: string): boolean {
 // WHY: the workrail repo itself contains a workflows/ directory with wr.* IDs.
 // If that repo (or any ancestor) is in the remembered-roots store, the walker
 // would discover it as a custom source, causing wr.* validation failures everywhere.
-// Accepts both this fork's scope and the upstream scope so a developer who has
-// both checked out gets the same guard for either.
+// Accepts this fork's current scope, its pre-rename scope (@ikani.samani --
+// see ADR-011's "Update" note), and the upstream scope, so a developer who
+// has an older checkout or the upstream repo gets the same guard either way.
 const WORKRAIL_PACKAGE_NAMES: ReadonlySet<string> = new Set([
+  '@ikani-pdq/workrail',
   '@ikani.samani/workrail',
   '@exaudeus/workrail',
 ]);

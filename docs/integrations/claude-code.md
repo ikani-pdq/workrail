@@ -5,9 +5,12 @@ This guide covers setting up WorkRail with Claude Code (both Desktop and CLI).
 **Prerequisite:** install WorkRail locally first, per the [main README's
 Install section](../../README.md#install) (`git clone` -> `npm run build` ->
 `npm pack` -> `npm install -g` the tarball). Do not use `npx
-@ikani.samani/workrail` -- the public npm registry is not a trusted install
-source for this fork, and `npx` would silently fetch whatever `latest`
-currently resolves to. Every config below assumes the `workrail` binary is
+@ikani.samani/workrail` -- that name resolves on the public npm registry to a
+different, unaudited fork (see [ADR-011](../adrs/011-distribution-model.md)),
+not this repository, and `npx` would silently fetch whatever `latest`
+currently resolves to there. This repo's own package is `@ikani-pdq/workrail`,
+which is `private: true` and never published -- the only trusted install
+source is a local build. Every config below assumes the `workrail` binary is
 already on your `PATH` from that local install.
 
 ## Quick Start

@@ -779,6 +779,17 @@ describe('discoverRootedWorkflowDirectories -- workrail package dir guard', () =
     }
   });
 
+  it('skips a checkout named with the current @ikani-pdq scope', async () => {
+    const currentScopeCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-pkg-current-'));
+    try {
+      makeWorkrailCheckout(currentScopeCheckout, '@ikani-pdq/workrail');
+      const { discovered } = await discoverRootedWorkflowDirectories([currentScopeCheckout]);
+      expect(discovered).toHaveLength(0);
+    } finally {
+      fs.rmSync(currentScopeCheckout, { recursive: true, force: true });
+    }
+  });
+
   it('also skips checkouts named with the upstream @exaudeus scope', async () => {
     // A developer may have the upstream WorkRail checkout on disk for
     // reference. The guard accepts both scopes so either checkout is skipped.

@@ -3,6 +3,23 @@
 **Status:** Adopted
 **Date:** 2026-09-17
 
+> **Update (2026-09-17):** Following a pilot security review, `package.json`'s
+> `name` field was changed from `@ikani.samani/workrail` to
+> `@ikani-pdq/workrail` (console package likewise renamed to
+> `@ikani-pdq/workrail-console`). The maintainer's `iconza98/workrail` fork
+> could not be deprecated/unpublished on short notice (it backs a separate,
+> personal use of the maintainer's), so the rogue npm package's identity
+> remains an accepted, tracked risk exactly as this ADR already describes
+> below -- the rename does not change that. It does two things this ADR's
+> original text did not: removes the shared package *name* between this repo
+> and that fork going forward (no functional effect, since this repo never
+> published under either name), and gives the MCP server a same-repo
+> provenance check at startup (`src/runtime/verify-package-provenance.ts`)
+> that refuses to run if its own `package.json.repository.url` doesn't point
+> at `ikani-pdq/workrail` -- see `docs/security.md`. Passages below that quote
+> the pre-rename name as historical fact (e.g. PR #14, the state of
+> `package.json` as of this ADR's original adoption) are left as written.
+
 ## Context
 
 This fork (`ikani-pdq/workrail`) does not publish to any package registry — `package.json` is `"private": true` and `.releaserc.cjs` has no `@semantic-release/npm` plugin (see [ADR-010](010-release-pipeline.md), which documents the release *mechanics*; this ADR is the canonical record of the distribution/registry *decision* itself — the two are related but distinct, and this one supersedes any implication that the question is still open).
