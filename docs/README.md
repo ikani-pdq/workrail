@@ -7,6 +7,7 @@
 - **[Architecture Guide](implementation/02-architecture.md)** - System architecture and design principles
 - **[Agent Cascade Protocol](design/agent-cascade-protocol.md)** - Capability-tiered execution model for agentic environments
 - **[Subagent Design Principles](design/subagent-design-principles.md)** - Durable guidance for subagent roles, delegation, and audit patterns
+- **[Architecture Decision Records](adrs/)** - Numbered ADRs for locked architectural/process decisions; see especially [ADR-010: Release Pipeline](adrs/010-release-pipeline.md) and [ADR-011: Canonical Distribution Model](adrs/011-distribution-model.md)
 
 ## Development Guides
 

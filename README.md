@@ -3,7 +3,6 @@
   <h1>WorkRail</h1>
   <p>Step-by-step workflow enforcement for AI agents</p>
 
-[![npm version](https://img.shields.io/npm/v/@exaudeus/workrail.svg)](https://www.npmjs.com/package/@exaudeus/workrail)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
@@ -187,11 +186,14 @@ publish to the npm registry. Build and install locally instead (see
 [Install](#install) below).
 
 **Do not install this fork via `npm install` or `npx` from the public npm
-registry.** A remotely-published copy of this project exists there via a
-personal upstream fork, but it is not security-hardened to this repository's
-standards (no confirmed CI-enforced dependency audit or SBOM generation) and
-must not be used for company work. Only a local build from this repository is
-approved.
+registry.** A remotely-published copy of this project (`@ikani.samani/workrail`)
+exists there, sourced from `iconza98/workrail` -- a prior personal
+fork/account of the maintainer's, predating this hardened fork -- but it is
+not security-hardened to this repository's standards (no confirmed
+CI-enforced dependency audit or SBOM generation) and must not be used for
+company work. Only a local build from this repository is approved. This is a
+permanent decision, not an interim state -- see
+[ADR-011](docs/adrs/011-distribution-model.md).
 
 If you want the upstream public version, install `@exaudeus/workrail` from
 npmjs.org instead.

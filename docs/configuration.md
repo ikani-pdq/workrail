@@ -60,9 +60,11 @@ canonical source for this fork -- install locally from it first (see the
 README's [Install](../README.md#install) section -- `git clone` -> `npm run
 build` -> `npm pack` -> `npm install -g` the tarball). Do not install this
 fork via `npx` or `npm install` from the public npm registry: a
-remotely-published copy of this project exists there via a personal upstream
-fork, but it is not security-hardened to this repository's standards and must
-not be used for company work.
+remotely-published copy of this project (`@ikani.samani/workrail`, sourced
+from `iconza98/workrail`, a prior personal fork/account of the maintainer's)
+exists there, but it is not security-hardened to this repository's standards
+and must not be used for company work. This is a permanent decision, not an
+interim state -- see [ADR-011](adrs/011-distribution-model.md).
 
 Then add WorkRail to your MCP client, pointing at the locally installed
 binary directly via `scripts/mcp-workrail-guard.sh` (replace
