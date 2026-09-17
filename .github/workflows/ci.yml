@@ -271,20 +271,6 @@ jobs:
         run: npm audit --audit-level=high
         working-directory: console
 
-      - name: Security audit summary (pass)
-        if: success()
-        run: |
-          echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "No high/critical vulnerabilities found (root and console/)." >> $GITHUB_STEP_SUMMARY
-
-      - name: Security audit summary (fail)
-        if: failure()
-        run: |
-          echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "High or critical vulnerabilities detected in root and/or console/ -- merge blocked. See the failed audit step's log above for details." >> $GITHUB_STEP_SUMMARY
-
       - name: Generate SBOM
         if: ${{ !cancelled() }}
         run: |
