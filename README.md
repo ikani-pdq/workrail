@@ -226,8 +226,54 @@ npm install -g ./ikani-pdq-workrail-*.tgz
 *.tgz` if the glob above doesn't match. No `.npmrc` configuration,
 authentication token, or registry access is needed.
 
-To upgrade later: `git pull`, rebuild, `npm pack` again, and reinstall the
-new tarball the same way.
+## Updating an existing install
+
+Nothing updates automatically -- a `git pull` alone changes only your
+checkout, while the `workrail` and `worktrain` on your `PATH` keep running
+the build you last installed globally. Run the full sequence:
+
+```
+git pull
+npm install
+npm run build
+npm pack
+npm install -g ./ikani-pdq-workrail-*.tgz
+```
+
+`npm install` matters even when only source changed -- a pull that touches
+dependencies will otherwise build against stale ones.
+
+Then restart anything still holding the old build:
+
+- your MCP client (Claude Code, Cursor, etc.), so it relaunches the server
+- any running `worktrain daemon` or `worktrain console` -- these keep running
+  the previous build until restarted, even after it is uninstalled
+
+### One-time step when upgrading across the scope rename
+
+The package was renamed from `@ikani.samani/workrail` to
+`@ikani-pdq/workrail`. npm treats those as unrelated packages, so installing
+the new one leaves the old one installed alongside it. Remove it once:
+
+```
+npm uninstall -g @ikani.samani/workrail
+```
+
+Leaving it in place is worth avoiding on two counts: it is a stale build
+whose `workrail`/`worktrain` binaries compete for the same names on your
+`PATH`, and it shares its name with the unaudited npm package described
+above, which makes a global package listing actively misleading about what
+you are running.
+
+`scripts/mcp-workrail-guard.sh` will not warn you about this. It looks up the
+new name, does not find it, and reports `installed: none` -- it has no way to
+tell a first-time install from one shadowed by the old scope.
+
+Check what you actually have with:
+
+```
+npm ls -g --depth=0
+```
 
 ## Verify
 
@@ -235,9 +281,11 @@ new tarball the same way.
 workrail --version
 ```
 
-This prints the version from the tarball you built and installed. If the
-command is not found, confirm the global npm bin directory (`npm bin -g`) is
-on your `PATH`.
+This prints `WorkRail v<version>` from the tarball you built and installed.
+Confirm it matches the `version` field in this checkout's `package.json` --
+if it does not, the reinstall above did not take. If the command is not
+found, confirm the global npm bin directory (`npm bin -g`) is on your
+`PATH`.
 
 ## Wire up your MCP client
 
