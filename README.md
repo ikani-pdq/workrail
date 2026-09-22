@@ -205,6 +205,45 @@ npmjs.org instead.
 - **npm 11.11.1 or newer** (set in `package.json` via the `packageManager`
   field; `corepack` will activate it automatically).
 
+## One-time step if you have an earlier build installed
+
+Do this **before** installing, not after. Skip it only if you have never
+installed WorkRail globally under any other name.
+
+This package was renamed from `@ikani.samani/workrail` to
+`@ikani-pdq/workrail`, and the upstream project publishes
+`@exaudeus/workrail`. npm treats all three as unrelated packages, but they
+declare the same two binaries, `workrail` and `worktrain`. npm refuses to
+hand a binary name to a second package, so if any of the others is still
+installed the install below fails outright:
+
+```
+npm error code EEXIST
+npm error path .../bin/workrail
+```
+
+Nothing is installed when that happens -- you keep whatever build you had.
+Remove the others first:
+
+```
+npm uninstall -g @ikani.samani/workrail @exaudeus/workrail
+```
+
+Worth doing even setting the conflict aside: a leftover is a stale build
+competing for the same names on your `PATH`, and `@ikani.samani/workrail`
+shares its name with the unaudited npm package described above, which makes
+a global package listing actively misleading about what you are running.
+
+`scripts/mcp-workrail-guard.sh` will not warn you. It looks up the new name,
+does not find it, and reports `installed: none` -- it has no way to tell a
+first-time install from one shadowed by an older scope.
+
+Check what you actually have with:
+
+```
+npm ls -g --depth=0
+```
+
 ## Install
 
 Install from a local build rather than the npm registry. This guarantees you
@@ -226,8 +265,42 @@ npm install -g ./ikani-pdq-workrail-*.tgz
 *.tgz` if the glob above doesn't match. No `.npmrc` configuration,
 authentication token, or registry access is needed.
 
-To upgrade later: `git pull`, rebuild, `npm pack` again, and reinstall the
-new tarball the same way.
+## Updating an existing install
+
+Nothing updates automatically -- a `git pull` alone changes only your
+checkout, while the `workrail` and `worktrain` on your `PATH` keep running
+the build you last installed globally. Run the full sequence:
+
+```
+git pull
+npm install
+npm run build
+rm -f ./ikani-pdq-workrail-*.tgz
+npm pack
+npm install -g ./ikani-pdq-workrail-*.tgz
+```
+
+`npm install` matters even when only source changed -- a pull that touches
+dependencies will otherwise build against stale ones.
+
+The `rm -f` is not housekeeping, and skipping it is the easiest way to end
+up running the wrong build. `npm pack` never removes the tarball from your
+last update, and the version changes on every release, so a second tarball
+accumulates beside the first. The install glob then matches both, and npm
+silently installs whichever it picks -- reporting `added 1 package` and
+exiting 0 while leaving you on a stale build. Deleting first keeps exactly
+one tarball, so the glob can only ever match the one you just built.
+
+Then restart anything still holding the old build:
+
+- your MCP client (Claude Code, Cursor, etc.), so it relaunches the server
+- any running `worktrain daemon` or `worktrain console` -- these keep running
+  the previous build until restarted, even after it is uninstalled
+
+If you are crossing the scope rename for the first time, the install step
+above will fail with `EEXIST` until you remove the older package -- see
+[One-time step if you have an earlier build
+installed](#one-time-step-if-you-have-an-earlier-build-installed).
 
 ## Verify
 
@@ -235,9 +308,13 @@ new tarball the same way.
 workrail --version
 ```
 
-This prints the version from the tarball you built and installed. If the
-command is not found, confirm the global npm bin directory (`npm bin -g`) is
-on your `PATH`.
+This prints `WorkRail v<version>` from the tarball you built and installed.
+Confirm it matches the `version` field in this checkout's `package.json`.
+If it reports an older version, the most likely cause is a leftover tarball
+from a previous update: run `ls *.tgz`, and if there is more than one,
+delete them all and redo `npm pack` and the install. If the command is not
+found, confirm the global npm bin directory (`npm prefix -g`, plus `/bin`)
+is on your `PATH`.
 
 ## Wire up your MCP client
 

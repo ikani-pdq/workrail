@@ -38,13 +38,16 @@ describe('executeVersionCommand', () => {
 
 describe('workrail version CLI integration', () => {
   it('outputs WorkRail v<version> to stdout with exit code 0', () => {
-    const { execSync } = require('child_process');
+    const { execFileSync } = require('child_process');
     const path = require('path');
     const cliPath = path.join(__dirname, '../../dist/cli.js');
 
+    // execFileSync, not execSync: the latter goes through a shell, so a
+    // checkout path containing a space splits into two arguments and node
+    // fails with MODULE_NOT_FOUND on the truncated path.
     let output: string;
     try {
-      output = execSync(`node ${cliPath} version`, { encoding: 'utf-8' });
+      output = execFileSync('node', [cliPath, 'version'], { encoding: 'utf-8' });
     } catch (err: any) {
       throw new Error(`CLI exited with non-zero code: ${err.message}`);
     }

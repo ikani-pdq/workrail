@@ -27,6 +27,7 @@ import { randomUUID } from 'crypto';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { loadDaemonEnv } from './daemon/daemon-env.js';
+import { readPackageVersion } from './runtime/package-version.js';
 import {
   executeWorktrainInitCommand,
   executeWorktrainTellCommand,
@@ -57,7 +58,10 @@ const program = new Command();
 program
   .name('worktrain')
   .description('WorkTrain daemon management')
-  .version('0.0.3');
+  // Read from the installed package rather than a literal: the previous
+  // hardcoded '0.0.3' never tracked package.json and drifted ~3 major
+  // versions behind what was actually installed.
+  .version(readPackageVersion(__dirname) ?? 'unknown');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INIT COMMAND
