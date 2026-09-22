@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -46,7 +46,10 @@ describe('CLI Validate Command', () => {
 
   function runCliCommand(args: string[]): { exitCode: number; output: string; error: string } {
     try {
-      const output = execSync(`node ${cliPath} ${args.join(' ')}`, {
+      // execFileSync, not execSync: the latter goes through a shell, so a
+      // checkout path containing a space splits into two arguments and node
+      // fails with MODULE_NOT_FOUND on the truncated path.
+      const output = execFileSync('node', [cliPath, ...args], {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe']
       });
@@ -233,8 +236,11 @@ describe('CLI Validate Command', () => {
       };
       const filename = 'file with spaces.json';
       const tempFile = createTempFile(JSON.stringify(workflowWithSpaces), filename);
-      const result = runCliCommand(['validate', `"${tempFile}"`]);
-      
+      // No manual quoting: runCliCommand passes argv directly with no shell
+      // between it and node, so the path arrives intact. Quoting here would
+      // make the literal quote characters part of the filename.
+      const result = runCliCommand(['validate', tempFile]);
+
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain('✅ Workflow is valid');
     });
