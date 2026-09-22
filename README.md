@@ -236,12 +236,21 @@ the build you last installed globally. Run the full sequence:
 git pull
 npm install
 npm run build
+rm -f ./ikani-pdq-workrail-*.tgz
 npm pack
 npm install -g ./ikani-pdq-workrail-*.tgz
 ```
 
 `npm install` matters even when only source changed -- a pull that touches
 dependencies will otherwise build against stale ones.
+
+The `rm -f` is not housekeeping, and skipping it is the easiest way to end
+up running the wrong build. `npm pack` never removes the tarball from your
+last update, and the version changes on every release, so a second tarball
+accumulates beside the first. The install glob then matches both, and npm
+silently installs whichever it picks -- reporting `added 1 package` and
+exiting 0 while leaving you on a stale build. Deleting first keeps exactly
+one tarball, so the glob can only ever match the one you just built.
 
 Then restart anything still holding the old build:
 
@@ -282,10 +291,12 @@ workrail --version
 ```
 
 This prints `WorkRail v<version>` from the tarball you built and installed.
-Confirm it matches the `version` field in this checkout's `package.json` --
-if it does not, the reinstall above did not take. If the command is not
-found, confirm the global npm bin directory (`npm bin -g`) is on your
-`PATH`.
+Confirm it matches the `version` field in this checkout's `package.json`.
+If it reports an older version, the most likely cause is a leftover tarball
+from a previous update: run `ls *.tgz`, and if there is more than one,
+delete them all and redo `npm pack` and the install. If the command is not
+found, confirm the global npm bin directory (`npm prefix -g`, plus `/bin`)
+is on your `PATH`.
 
 ## Wire up your MCP client
 
