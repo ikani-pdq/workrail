@@ -205,6 +205,45 @@ npmjs.org instead.
 - **npm 11.11.1 or newer** (set in `package.json` via the `packageManager`
   field; `corepack` will activate it automatically).
 
+## One-time step if you have an earlier build installed
+
+Do this **before** installing, not after. Skip it only if you have never
+installed WorkRail globally under any other name.
+
+This package was renamed from `@ikani.samani/workrail` to
+`@ikani-pdq/workrail`, and the upstream project publishes
+`@exaudeus/workrail`. npm treats all three as unrelated packages, but they
+declare the same two binaries, `workrail` and `worktrain`. npm refuses to
+hand a binary name to a second package, so if any of the others is still
+installed the install below fails outright:
+
+```
+npm error code EEXIST
+npm error path .../bin/workrail
+```
+
+Nothing is installed when that happens -- you keep whatever build you had.
+Remove the others first:
+
+```
+npm uninstall -g @ikani.samani/workrail @exaudeus/workrail
+```
+
+Worth doing even setting the conflict aside: a leftover is a stale build
+competing for the same names on your `PATH`, and `@ikani.samani/workrail`
+shares its name with the unaudited npm package described above, which makes
+a global package listing actively misleading about what you are running.
+
+`scripts/mcp-workrail-guard.sh` will not warn you. It looks up the new name,
+does not find it, and reports `installed: none` -- it has no way to tell a
+first-time install from one shadowed by an older scope.
+
+Check what you actually have with:
+
+```
+npm ls -g --depth=0
+```
+
 ## Install
 
 Install from a local build rather than the npm registry. This guarantees you
@@ -258,31 +297,10 @@ Then restart anything still holding the old build:
 - any running `worktrain daemon` or `worktrain console` -- these keep running
   the previous build until restarted, even after it is uninstalled
 
-### One-time step when upgrading across the scope rename
-
-The package was renamed from `@ikani.samani/workrail` to
-`@ikani-pdq/workrail`. npm treats those as unrelated packages, so installing
-the new one leaves the old one installed alongside it. Remove it once:
-
-```
-npm uninstall -g @ikani.samani/workrail
-```
-
-Leaving it in place is worth avoiding on two counts: it is a stale build
-whose `workrail`/`worktrain` binaries compete for the same names on your
-`PATH`, and it shares its name with the unaudited npm package described
-above, which makes a global package listing actively misleading about what
-you are running.
-
-`scripts/mcp-workrail-guard.sh` will not warn you about this. It looks up the
-new name, does not find it, and reports `installed: none` -- it has no way to
-tell a first-time install from one shadowed by the old scope.
-
-Check what you actually have with:
-
-```
-npm ls -g --depth=0
-```
+If you are crossing the scope rename for the first time, the install step
+above will fail with `EEXIST` until you remove the older package -- see
+[One-time step if you have an earlier build
+installed](#one-time-step-if-you-have-an-earlier-build-installed).
 
 ## Verify
 
