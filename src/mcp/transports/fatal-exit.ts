@@ -27,6 +27,8 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
+import { readPackageVersion } from '../../runtime/package-version.js';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -255,14 +257,7 @@ export function registerFatalHandlers(transport: TransportKind): void {
  *   [Startup] transport=stdio pid=12345 version=3.24.4
  */
 export function logStartup(transport: TransportKind, extra?: Record<string, string | number>): void {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const version = (() => {
-    try {
-      return (require('../../package.json') as { version: string }).version;
-    } catch {
-      return 'unknown';
-    }
-  })();
+  const version = readPackageVersion(__dirname) ?? 'unknown';
 
   const parts = [
     `[Startup] transport=${transport}`,
