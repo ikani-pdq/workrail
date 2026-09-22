@@ -197,9 +197,12 @@ describe('MCP Server Core Functionality', () => {
   describe('Server Composition (src/mcp/server.ts)', () => {
     const serverContent = fs.readFileSync(path.join(mcpDir, 'server.ts'), 'utf8');
 
-    it('should configure server with correct name and version', () => {
+    it('should configure server with correct name and a resolved version', () => {
       expect(serverContent).toContain("name: 'workrail-server'");
-      expect(serverContent).toContain("version: '0.1.0'");
+      // Must be the resolved install version, never a literal: this is the version
+      // MCP clients display, and a hardcoded one silently misreports the running build.
+      expect(serverContent).toContain('version: serverVersion');
+      expect(serverContent).toContain('readPackageVersion(__dirname)');
     });
 
     it('should register request handlers', () => {

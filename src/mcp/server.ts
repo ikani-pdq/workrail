@@ -22,6 +22,7 @@ import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
+import { readPackageVersion } from '../runtime/package-version.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import { validateWorkflowSchema } from '../application/validation.js';
 import { normalizeV1WorkflowToPinnedSnapshot } from '../v2/read-only/v1-to-v2-shim.js';
@@ -282,16 +283,9 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // ---------------------------------------------------------------------------
   const timingRingBuffer = new ToolCallTimingRingBuffer(DEFAULT_RING_BUFFER_CAPACITY);
 
-  // Server version read once at startup for stamping persisted timing records.
-  // Uses fs.readFileSync to avoid import assertion syntax incompatible with commonjs module target.
-  let serverVersion = 'unknown';
-  try {
-    const pkgPath = path.resolve(__dirname, '../../package.json');
-    const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
-    if (pkgJson.version) serverVersion = pkgJson.version;
-  } catch {
-    // Non-fatal: version defaults to 'unknown' if package.json is unreadable
-  }
+  // Server version, read once at startup. Stamped into persisted timing records
+  // and reported to MCP clients in the initialize handshake.
+  const serverVersion = readPackageVersion(__dirname) ?? 'unknown';
 
   // Derive the tool-calls JSONL path from the data dir port (respects WORKRAIL_DATA_DIR).
   // null when v2 data dir is not available (e.g. v2 tools disabled).
@@ -346,7 +340,7 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   const server = new Server(
     {
       name: 'workrail-server',
-      version: '0.1.0',
+      version: serverVersion,
     },
     {
       capabilities: {
