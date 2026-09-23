@@ -11,36 +11,27 @@
  * MCP server entry point -- it should stay focused on transport concerns.
  * The CLI shim is a thin dispatcher that keeps the two concerns separate.
  *
- * WHY --version is handled here rather than falling through: the fall-through
- * starts a stdio MCP server, so `workrail --version` used to hang waiting on
- * a protocol handshake instead of printing anything -- despite the README
- * documenting it as the way to verify an install.
+ * WHY version requests are handled here rather than falling through: the
+ * fall-through starts a stdio MCP server, so `workrail --version` used to
+ * hang waiting on a protocol handshake instead of printing anything --
+ * despite the README documenting it as the way to verify an install. Every
+ * spelling of the request is claimed for the same reason; any left
+ * unclaimed becomes a server rather than an error.
  *
  * Usage:
  *   workrail                   -- starts MCP server (stdio or http)
- *   workrail --version | -v    -- prints the installed version
+ *   workrail --version         -- prints the installed version
+ *              | -v | -V | version
  *   workrail report [opts]     -- alias for: worktrain report [opts]
  *   workrail console [opts]    -- alias for: worktrain console [opts]
  */
 
-import { executeVersionCommand } from './cli/commands/version.js';
-import { failure } from './cli/types/cli-result.js';
-import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
-import { readPackageVersion } from './runtime/package-version.js';
+import { isVersionRequest, runVersionRequest } from './cli/version-request.js';
 
 const subcommand = process.argv[2];
 
-if (subcommand === '--version' || subcommand === '-v') {
-  const version = readPackageVersion(__dirname);
-
-  interpretCliResultWithoutDI(
-    version === null
-      ? failure('Failed to read version: no readable package.json found for this install')
-      : executeVersionCommand({
-          getVersion: () => version,
-          print: (msg) => console.log(msg),
-        })
-  );
+if (isVersionRequest(subcommand)) {
+  runVersionRequest(__dirname);
 } else if (subcommand === 'report' || subcommand === 'console') {
   // Delegate to cli-worktrain.ts which owns these implementations.
   // We do a dynamic import so mcp-server dependencies are never loaded

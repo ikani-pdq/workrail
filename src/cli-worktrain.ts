@@ -27,7 +27,7 @@ import { randomUUID } from 'crypto';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { loadDaemonEnv } from './daemon/daemon-env.js';
-import { readPackageVersion } from './runtime/package-version.js';
+import { isVersionRequest, runVersionRequest } from './cli/version-request.js';
 import {
   executeWorktrainInitCommand,
   executeWorktrainTellCommand,
@@ -53,15 +53,24 @@ const execFileAsync = promisify(execFile);
 // PROGRAM DEFINITION
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Answered before commander parses. commander's .version() accepts a single
+// short flag, which is why `worktrain -v` used to error while `workrail -v`
+// printed; handling it here lets both binaries accept every spelling and emit
+// one identical string. Kept ahead of the parser so no command definition can
+// shadow it.
+if (isVersionRequest(process.argv[2])) {
+  runVersionRequest(__dirname);
+}
+
 const program = new Command();
 
 program
   .name('worktrain')
   .description('WorkTrain daemon management')
-  // Read from the installed package rather than a literal: the previous
-  // hardcoded '0.0.3' never tracked package.json and drifted ~3 major
-  // versions behind what was actually installed.
-  .version(readPackageVersion(__dirname) ?? 'unknown');
+  // Declared for `--help` discoverability only: the request is intercepted
+  // above before commander parses, so this option is never actually read.
+  // `-V` is also accepted there, undocumented, so existing callers keep working.
+  .option('-v, --version', 'output the version number');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INIT COMMAND
