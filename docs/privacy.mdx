@@ -26,7 +26,7 @@ WorkRail touches the network only in two opt-in cases:
 
 **Git repository workflows** (opt-in). If you configure `WORKFLOW_GIT_REPOS`, WorkRail clones or pulls from those repositories at startup to load workflow definitions. You control which repos and when. No repos are configured by default.
 
-**npm installation** (`npx @exaudeus/workrail`). The initial install downloads the package from npm. After that, running the installed version requires no network access.
+**Dependency installation** (once, at build time). WorkRail is installed from a local build of this repository rather than the npm registry, so nothing is fetched when the server launches. The one network step is `npm install` while building, which downloads dependencies. After that, running the installed build requires no network access.
 
 ## Your data, your control
 
@@ -45,23 +45,29 @@ rm -rf ~/.workrail/data/sessions/
 
 ## Using WorkRail in air-gapped environments
 
-WorkRail works without internet access as long as the package is already installed:
+WorkRail works without internet access once it is built and installed. Build it somewhere with network access, following the Install section of the README:
 
 ```sh
-# Install once with network access
-npm install -g @exaudeus/workrail
+npm install
+npm run build
+npm pack
+npm install -g ./ikani-pdq-workrail-*.tgz
+```
 
-# Then configure your MCP client to use the global install directly
+Then point your MCP client at the guard script, which verifies the installed build against your checkout before launching it:
+
+```json
 {
   "mcpServers": {
     "workrail": {
-      "command": "workrail"
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
 ```
 
-This avoids `npx` (which checks npm on each invocation) and works in environments where outbound network access is restricted.
+Nothing here consults a registry at launch, so this works in environments where outbound network access is restricted. Leave `WORKFLOW_GIT_REPOS` unset, as it is by default, and the server makes no outbound requests at all.
 
 ## Further reading
 
