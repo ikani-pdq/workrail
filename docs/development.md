@@ -140,7 +140,10 @@ any upstream URL survives outside `UPSTREAM_URL_ALLOWLIST`. The second asks
 whether a user is being sent upstream *for help* -- a link to upstream issues,
 discussions, pull requests, or security -- and being on `UPSTREAM_URL_ALLOWLIST`
 does not exempt that. `README.md`, for instance, is allowlisted whole-file so
-its attribution survives, but an upstream issue link added there still fails.
+its attribution survives. A third check then covers the gap that leaves: every
+upstream reference in `README.md` must read as attribution, so a bare
+repository link carried in by a merge fails even though the file is exempt
+from the broad check. Upstream's own README footer carries exactly that shape.
 If you hit the message "a user is being sent upstream for help", widening
 `UPSTREAM_URL_ALLOWLIST` will not clear it; repoint the link. The much narrower
 `UPSTREAM_SUPPORT_ALLOWLIST` covers only the places where linking an upstream

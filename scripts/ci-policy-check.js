@@ -109,8 +109,8 @@ const UPSTREAM_SUPPORT_ALLOWLIST = [
 // Returns { status, stdout }. git grep exit codes: 0 = matches found,
 // 1 = no matches, >1 = error. A match is a policy violation here, so 0 is the
 // failure case -- do not collapse this into a truthiness check.
-function runUpstreamGrep(pattern, allowlist) {
-  const args = ['grep', '-niE', pattern, '--', '.', ...allowlist.map((p) => `:!${p}`)];
+function runUpstreamGrep(pattern, allowlist, paths = ['.']) {
+  const args = ['grep', '-niE', pattern, '--', ...paths, ...allowlist.map((p) => `:!${p}`)];
   try {
     return { status: 0, stdout: execFileSync('git', args, { encoding: 'utf8' }) };
   } catch (err) {
@@ -119,6 +119,47 @@ function runUpstreamGrep(pattern, allowlist) {
       stdout: err.stdout || '',
       detail: err.code || err.message,
     };
+  }
+}
+
+// README.md is exempt from the checks above so its attribution survives, but a
+// whole-file exemption also hides anything an upstream merge adds to it.
+// Upstream's own README footer carries a bare repository link with no path
+// suffix, so no support pattern matches it, and docs/development.md names
+// README.md as a guaranteed merge conflict -- this is a live path, not a
+// hypothetical one.
+//
+// So: every upstream reference in README.md must sit on a line that reads as
+// attribution. A bare link dropped in by a merge does not, and fails.
+//
+// Matched by shape rather than by exact text, deliberately: spelling the
+// upstream URL out here would make this script trip its own check.
+const README_ATTRIBUTION_MARKER = /fork of |fork tracks /i;
+
+function checkReadmeUpstreamRefs() {
+  const { status, stdout, detail } = runUpstreamGrep(UPSTREAM_URL_PATTERN, [], ['README.md']);
+
+  if (status !== 0 && status !== 1) {
+    fail(
+      `CI policy violation: README upstream-reference check could not run ` +
+        `(git grep exit ${status}${detail ? `: ${detail}` : ''})`
+    );
+  }
+
+  const offending = stdout
+    .split('\n')
+    .filter(Boolean)
+    .filter((line) => !README_ATTRIBUTION_MARKER.test(line));
+
+  if (offending.length) {
+    fail(
+      'CI policy violation: README.md points at the upstream project outside of\n' +
+        'attribution. README.md is exempt from the broad link check so its\n' +
+        'attribution can survive, which means anything else added here would\n' +
+        'otherwise ship unnoticed -- including a bare repository link carried in\n' +
+        'by an upstream merge. Repoint it at github.com/ikani-pdq/workrail.\n\n' +
+        offending.map((l) => `  ${l.trim()}`).join('\n')
+    );
   }
 }
 
@@ -233,6 +274,9 @@ function main() {
 
   // 8) Ensure no allowlisted path routes a user upstream for help
   checkNoUpstreamSupportLinks();
+
+  // 9) Ensure README.md carries only its two deliberate attribution references
+  checkReadmeUpstreamRefs();
 
   console.log('CI policy check passed');
 }
