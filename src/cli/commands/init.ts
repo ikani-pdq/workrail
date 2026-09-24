@@ -7,6 +7,7 @@
  */
 
 import type { CliResult } from '../types/cli-result.js';
+import { repositoryFileUrl } from '../../constants/repository.js';
 import { success, failure } from '../types/cli-result.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -108,7 +109,7 @@ export async function executeInitCommand(deps: InitCommandDeps): Promise<CliResu
  */
 const CONFIG_FILE_TEMPLATE = `{
   "_comment": "WorkRail configuration file. Uncomment any key to override its default.",
-  "_docs": "Full reference: https://github.com/ikani-pdq/workrail/blob/main/docs/configuration.md",
+  "_docs": "Full reference: ${repositoryFileUrl('docs/configuration.md')}",
 
   "CACHE_TTL": "300000",
   "WORKRAIL_WORKFLOWS_DIR": "",

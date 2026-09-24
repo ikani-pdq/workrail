@@ -123,17 +123,17 @@ job red if a merge reintroduces a link to the upstream project, so a bad
 resolution on the bullet above surfaces in CI rather than in a user's bug
 report. The failure names the offending file and line.
 
-Note that this does not currently block the merge: `ci-success` lists
-`ci-policy` in its `needs` but never inspects `needs['ci-policy'].result`, and
-`CI Success` is the only required status check. Treat a red `CI Policy` as a
-stop signal rather than relying on the gate to enforce it.
+This does block the merge. `ci-success` inspects `needs['ci-policy'].result`
+and fails when it is not `success`, and `CI Success` is the required status
+check, so a red `CI Policy` holds the PR. The script asserts that wiring on
+itself: `ci-policy` is in its own `requiredNeeds` list, so removing the gate
+fails the very check the gate protects.
 
 When it fires, the first question is whether the link should be repointed at
 `ikani-pdq/workrail` -- that is almost always the answer. Widen
 `UPSTREAM_URL_ALLOWLIST` only for a reference that is deliberate and permanent,
-such as attribution or a record of what was true when written. Note that
-`docs/design/` holds transient working papers, so an exemption there is broader
-than it looks.
+such as attribution or a record of what was true when written. Exemptions are
+whole-directory, so prefer fixing a link over adding one.
 
 There are two checks, and they fail differently. The first, above, asks whether
 any upstream URL survives outside `UPSTREAM_URL_ALLOWLIST`. The second asks

@@ -14,6 +14,7 @@
  */
 
 import * as os from 'os';
+import { repositoryFileUrl } from '../constants/repository.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { z } from 'zod';
@@ -114,7 +115,7 @@ const ConfigFileSchema = z.record(z.string(), z.string());
 
 const CONFIG_FILE_TEMPLATE = `{
   "_comment": "WorkRail configuration. Values here are defaults; process.env always wins.",
-  "_docs": "https://github.com/ikani-pdq/workrail/blob/main/docs/configuration.md",
+  "_docs": "${repositoryFileUrl('docs/configuration.md')}",
 
   "CACHE_TTL": "300000",
   "WORKRAIL_ENABLE_SESSION_TOOLS": "true",

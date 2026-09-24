@@ -95,11 +95,13 @@ const UPSTREAM_URL_ALLOWLIST = [
 const UPSTREAM_SUPPORT_URL_PATTERN =
   'github\\.com/(exaudeus|EtienneBBeaulac)/[A-Za-z0-9._-]+/(issues|discussions|pulls?|security)';
 
+// Narrower than UPSTREAM_URL_ALLOWLIST on purpose: only the places where
+// linking an upstream issue IS the provenance being recorded. docs/design and
+// docs/plans are deliberately absent -- they hold transient working papers, so
+// a support link there is a mistake rather than a record.
 const UPSTREAM_SUPPORT_ALLOWLIST = [
   'docs/adrs',
   'docs/history',
-  'docs/design',
-  'docs/plans',
   'design-docs',
   'docs/ideas/backlog.md',
   'triggers.yml',
@@ -239,6 +241,7 @@ function main() {
 
   // 4) Ensure CI Success depends on the full required set
   const requiredNeeds = [
+    'ci-policy',
     'lockfile',
     'build-artifact',
     'semantic-release-dry-run',
