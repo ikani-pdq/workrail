@@ -135,6 +135,18 @@ such as attribution or a record of what was true when written. Note that
 `docs/design/` holds transient working papers, so an exemption there is broader
 than it looks.
 
+There are two checks, and they fail differently. The first, above, asks whether
+any upstream URL survives outside `UPSTREAM_URL_ALLOWLIST`. The second asks
+whether a user is being sent upstream *for help* -- a link to upstream issues,
+discussions, pull requests, or security -- and being on `UPSTREAM_URL_ALLOWLIST`
+does not exempt that. `README.md`, for instance, is allowlisted whole-file so
+its attribution survives, but an upstream issue link added there still fails.
+If you hit the message "a user is being sent upstream for help", widening
+`UPSTREAM_URL_ALLOWLIST` will not clear it; repoint the link. The much narrower
+`UPSTREAM_SUPPORT_ALLOWLIST` covers only the places where linking an upstream
+issue *is* the provenance being recorded, such as `docs/adrs/` and
+`docs/ideas/backlog.md`.
+
 ## Branch and commit conventions
 
 - Branch naming: use a short descriptive name (e.g. `fix/session-timeout`,

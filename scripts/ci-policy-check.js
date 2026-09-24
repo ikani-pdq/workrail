@@ -93,7 +93,7 @@ const UPSTREAM_URL_ALLOWLIST = [
 // This narrower pattern is checked everywhere except the places where linking
 // an upstream issue IS the provenance being recorded.
 const UPSTREAM_SUPPORT_URL_PATTERN =
-  'github\\.com/(exaudeus|EtienneBBeaulac)/[A-Za-z0-9._-]+/(issues|discussions|pulls|security)';
+  'github\\.com/(exaudeus|EtienneBBeaulac)/[A-Za-z0-9._-]+/(issues|discussions|pulls?|security)';
 
 const UPSTREAM_SUPPORT_ALLOWLIST = [
   'docs/adrs',
@@ -147,23 +147,10 @@ function checkNoUpstreamSupportLinks() {
 }
 
 function checkNoUpstreamLinks() {
-  const args = [
-    'grep', '-niE', UPSTREAM_URL_PATTERN, '--', '.',
-    ...UPSTREAM_URL_ALLOWLIST.map((p) => `:!${p}`),
-  ];
-
-  // git grep exit codes: 0 = matches found, 1 = no matches, >1 = error.
-  // A match is a policy violation here, so 0 is the failure case -- do not
-  // collapse this into a truthiness check.
-  let status;
-  let stdout = '';
-  try {
-    stdout = execFileSync('git', args, { encoding: 'utf8' });
-    status = 0;
-  } catch (err) {
-    status = typeof err.status === 'number' ? err.status : -1;
-    stdout = err.stdout || '';
-  }
+  const { status, stdout, detail } = runUpstreamGrep(
+    UPSTREAM_URL_PATTERN,
+    UPSTREAM_URL_ALLOWLIST
+  );
 
   if (status === 1) return;
 
@@ -177,7 +164,10 @@ function checkNoUpstreamLinks() {
     );
   }
 
-  fail(`CI policy violation: upstream-link check could not run (git grep exit ${status})`);
+  fail(
+    `CI policy violation: upstream-link check could not run ` +
+      `(git grep exit ${status}${detail ? `: ${detail}` : ''})`
+  );
 }
 
 function main() {
