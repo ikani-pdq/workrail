@@ -55,3 +55,48 @@ describe('workrail version CLI integration', () => {
     expect(output.trim()).toMatch(/^WorkRail v\d+\.\d+\.\d+/);
   });
 });
+
+/**
+ * These exercise the binaries `package.json` actually points `bin` at.
+ *
+ * The suite above targets `dist/cli.js`, which has no `bin` entry -- so
+ * every shipped version surface was previously untested. That matters
+ * especially for `workrail`, where an unrecognised argument falls through
+ * to the MCP server: a regression does not fail loudly, it hangs on a stdio
+ * handshake. Each case therefore asserts on output AND is bounded by a
+ * timeout with stdin closed, so a fall-through fails the test instead of
+ * stalling the run.
+ */
+describe('shipped binaries: every version spelling', () => {
+  const { execFileSync } = require('child_process');
+  const path = require('path');
+
+  const run = (bin: string, arg: string): string =>
+    execFileSync('node', [path.join(__dirname, '../../dist', bin), arg], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 20_000,
+    });
+
+  describe.each([
+    ['cli-workrail.js', ['--version', '-v', '-V', 'version']],
+    ['cli-worktrain.js', ['--version', '-v', '-V']],
+  ])('%s', (bin, args) => {
+    it.each(args)('%s prints the version and exits 0', (arg) => {
+      const output = run(bin, arg);
+      expect(output.trim()).toMatch(/^WorkRail v\d+\.\d+\.\d+/);
+    });
+  });
+
+  it('never starts an MCP server for a version request', () => {
+    // The original #40 bug: `workrail --version` emitted a [Startup] line and
+    // blocked. Any spelling that regresses into the fall-through reintroduces it.
+    for (const arg of ['--version', '-v', '-V', 'version']) {
+      expect(run('cli-workrail.js', arg)).not.toContain('[Startup]');
+    }
+  });
+
+  it('both binaries report the identical string for the same build', () => {
+    expect(run('cli-worktrain.js', '--version')).toBe(run('cli-workrail.js', '--version'));
+  });
+});

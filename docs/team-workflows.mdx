@@ -19,8 +19,8 @@ Add `WORKFLOW_GIT_REPOS` to your MCP server config:
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"],
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"],
       "env": {
         "WORKFLOW_GIT_REPOS": "https://github.com/your-org/ai-workflows.git",
         "GITHUB_TOKEN": "ghp_your_token_here"

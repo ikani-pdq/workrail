@@ -13,39 +13,55 @@ This page covers the most common issues developers run into when installing Work
 
 **Symptom:** The MCP server fails immediately with a `Permission denied` error.
 
-**Cause:** Versions before 3.19.0 were published without the execute bit set on the binary.
+**Cause:** The execute bit is missing on the installed binary.
 
 **Fix:**
 
 ```sh
-# Option A: reinstall (recommended)
-npm install -g @exaudeus/workrail
+# Option A: rebuild and reinstall (recommended)
+npm run build && npm pack && npm install -g ./ikani-pdq-workrail-*.tgz
 
 # Option B: fix in place without reinstalling
-chmod +x $(npm root -g)/@exaudeus/workrail/dist/mcp-server.js
+chmod +x $(npm root -g)/@ikani-pdq/workrail/dist/mcp-server.js
 ```
 
 After fixing, restart your MCP client.
 
 ---
 
-### npx fails or hangs on first run
+### The install fails with EEXIST
 
-**Symptom:** `npx @exaudeus/workrail` hangs, times out, or throws a network error.
+**Symptom:** `npm install -g ./ikani-pdq-workrail-*.tgz` fails with `npm error code EEXIST` naming a path ending in `bin/workrail`.
 
-**Cause:** The first run downloads the package from npm. A slow network, proxy, or corporate firewall can interrupt this.
+**Cause:** Another package already owns the `workrail` and `worktrain` binary names. This package was renamed from `@ikani.samani/workrail`, and the upstream project publishes `@exaudeus/workrail`; npm will not hand a binary name to a second package, so the install is refused and nothing is installed.
 
 **Fix:**
 
 ```sh
-# Pre-install globally so npx resolves locally
-npm install -g @exaudeus/workrail
-
-# Verify the install
+npm uninstall -g @ikani.samani/workrail @exaudeus/workrail
+npm install -g ./ikani-pdq-workrail-*.tgz
 workrail --version
 ```
 
-Once installed globally, the MCP config still works unchanged -- `npx -y @exaudeus/workrail` prefers the global install when one exists.
+See the README's "One-time step if you have an earlier build installed" for the full explanation.
+
+---
+
+### `workrail --version` reports an older version than expected
+
+**Symptom:** The version printed does not match the `version` field in your checkout's `package.json`.
+
+**Cause:** Usually a leftover tarball. `npm pack` does not remove the one from your previous update, so the install glob matches more than one file and npm installs whichever it picks, exiting 0.
+
+**Fix:**
+
+```sh
+ls *.tgz                              # more than one?
+rm -f ./ikani-pdq-workrail-*.tgz
+npm pack
+npm install -g ./ikani-pdq-workrail-*.tgz
+workrail --version
+```
 
 ---
 
@@ -70,8 +86,8 @@ Once installed globally, the MCP config still works unchanged -- `npx -y @exaude
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"]
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
@@ -83,7 +99,7 @@ After editing: quit Claude Desktop fully (do not just close the window), then re
 
 ```sh
 # Add via CLI (recommended)
-claude mcp add workrail npx -y @exaudeus/workrail
+claude mcp add workrail bash /path/to/your/workrail/scripts/mcp-workrail-guard.sh
 ```
 
 Or add manually to `.mcp.json` in your project root:
@@ -93,8 +109,8 @@ Or add manually to `.mcp.json` in your project root:
   "mcpServers": {
     "workrail": {
       "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"]
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
@@ -113,7 +129,7 @@ After editing: exit and start a new Claude Code session. Verify the server loade
 | Cause | Fix |
 |-------|-----|
 | Node.js version too old | WorkRail requires Node 18+. Run `node --version` to check. |
-| `npx` resolves the wrong version | Run `npm install -g @exaudeus/workrail` and use the global binary. |
+| A stale global build | Rebuild and reinstall from your checkout; the guard script refuses to launch a mismatched build and prints the fix. |
 | `WORKFLOW_GIT_REPOS` points to an unreachable repo | Remove the env var or fix the URL; the server exits if it cannot clone on startup. |
 | Missing `GITHUB_TOKEN` for a private repo | Add `"GITHUB_TOKEN": "ghp_..."` to the `env` block in your MCP config. |
 
@@ -130,8 +146,8 @@ After editing: exit and start a new Claude Code session. Verify the server loade
 {
   "mcpServers": {
     "workrail-project": {
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"]
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
@@ -149,7 +165,7 @@ After editing: exit and start a new Claude Code session. Verify the server loade
 
 ```sh
 # See what workflows WorkRail can discover
-npx @exaudeus/workrail list
+workrail list
 
 # Check your custom workflow directory
 ls -la ~/.workrail/workflows/
@@ -314,8 +330,8 @@ If the test succeeds but WorkRail still fails, make sure `GITHUB_TOKEN` is in th
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"],
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"],
       "env": {
         "WORKFLOW_GIT_REPOS": "https://github.com/your-org/workflows.git",
         "GITHUB_TOKEN": "ghp_your_token_here"
@@ -403,10 +419,10 @@ Fix the tool names in your `~/.claude/agents/workrail-executor.md` and start a f
 
 ```sh
 # Is the package installed?
-npx @exaudeus/workrail --version
+workrail --version
 
 # What workflows are visible?
-npx @exaudeus/workrail list
+workrail list
 
 # Are custom workflow files valid JSON?
 node -e "require('/path/to/your/workflow.json')" && echo "Valid"

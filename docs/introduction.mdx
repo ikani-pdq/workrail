@@ -11,18 +11,22 @@ No separate process to run. No infrastructure to manage. Just add it to your MCP
 
 ## Quick Start
 
-Add WorkRail to your MCP client configuration (Claude Code, Cursor, or any MCP client):
+WorkRail is installed from a local build of this repository, not from the npm registry. Follow the Install section of the README first; it ends with a global install of the tarball you built.
+
+Then add WorkRail to your MCP client configuration (Claude Code, Cursor, or any MCP client), replacing `/path/to/your/workrail` with wherever you cloned it:
 
 ```json
 {
   "mcpServers": {
     "workrail": {
-      "command": "npx",
-      "args": ["-y", "@exaudeus/workrail"]
+      "command": "bash",
+      "args": ["/path/to/your/workrail/scripts/mcp-workrail-guard.sh"]
     }
   }
 }
 ```
+
+The guard script verifies the globally installed build matches your checkout before launching it, so you never silently run a stale version. There is no `npx` and no registry fetch at launch.
 
 Then prompt your agent:
 
