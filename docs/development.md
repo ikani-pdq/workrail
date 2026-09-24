@@ -108,9 +108,22 @@ every merge. Resolve in this fork's favour for these:
 - `README.md` -- fork-specific content.
 - `docs/development.md`, `docs/security.md` -- fork-only files that should
   not exist upstream.
+- Support and documentation links -- `mint.json`, `docs/troubleshooting.mdx`,
+  `docs/reference/*.md`, and the URLs emitted by `src/cli/commands/init.ts`,
+  `src/cli/commands/worktrain-init.ts`,
+  `src/cli/commands/worktrain-diagnose.ts` and `src/config/config-file.ts`.
+  Upstream points these at its own repository; this fork points them at
+  `ikani-pdq/workrail`.
 
 When upstream renames things in `package.json` or restructures release
 config, do not auto-accept their version. Re-derive the fork's shape.
+
+`scripts/ci-policy-check.js` fails the build if a merge reintroduces a
+user-facing link to the upstream project, so a bad resolution on the bullet
+above surfaces in CI rather than in a user's bug report. The failure names the
+offending file and line. If the reference is deliberate -- attribution, or a
+record of what was true when written -- add its path to
+`UPSTREAM_URL_ALLOWLIST` in that script.
 
 ## Branch and commit conventions
 

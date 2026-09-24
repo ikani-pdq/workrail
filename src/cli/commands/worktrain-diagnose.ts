@@ -939,7 +939,7 @@ function formatDefault(result: DiagnosticDefault, opts: FormatOptions): string {
     `  Raw:     ${result.rawEventLine.slice(0, 200)}`,
     ``,
     `  No automated fix suggestion available for this failure type.`,
-    `  File an issue: https://github.com/EtienneBBeaulac/workrail/issues`,
+    `  File an issue: https://github.com/ikani-pdq/workrail/issues`,
     ``,
     formatMetricsLine(result.metrics),
     ``,

@@ -114,7 +114,7 @@ const ConfigFileSchema = z.record(z.string(), z.string());
 
 const CONFIG_FILE_TEMPLATE = `{
   "_comment": "WorkRail configuration. Values here are defaults; process.env always wins.",
-  "_docs": "https://github.com/exaudeus/workrail/blob/main/docs/configuration.md",
+  "_docs": "https://github.com/ikani-pdq/workrail/blob/main/docs/configuration.md",
 
   "CACHE_TTL": "300000",
   "WORKRAIL_ENABLE_SESSION_TOOLS": "true",

@@ -108,7 +108,7 @@ export async function executeInitCommand(deps: InitCommandDeps): Promise<CliResu
  */
 const CONFIG_FILE_TEMPLATE = `{
   "_comment": "WorkRail configuration file. Uncomment any key to override its default.",
-  "_docs": "Full reference: https://github.com/exaudeus/workrail/blob/main/docs/configuration.md",
+  "_docs": "Full reference: https://github.com/ikani-pdq/workrail/blob/main/docs/configuration.md",
 
   "CACHE_TTL": "300000",
   "WORKRAIL_WORKFLOWS_DIR": "",
