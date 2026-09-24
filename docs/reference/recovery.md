@@ -2,7 +2,6 @@
 
 >  **Data recovery and disaster preparedness**
 
-[![Status](https://img.shields.io/badge/status-recovery_reference-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
 ##  Table of Contents
@@ -85,4 +84,4 @@ tar xzf ./backups/workflows-YYYY-MM-DD.tar.gz -C ./workflows
 
 ---
 
-**Need help with recovery?** Check the [Troubleshooting Guide](troubleshooting.md) or create an issue on GitHub. 
+**Need help with recovery?** Check the [Troubleshooting Guide](troubleshooting.md) or open an issue at [`ikani-pdq/workrail`](https://github.com/ikani-pdq/workrail/issues).

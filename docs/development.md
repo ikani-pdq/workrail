@@ -108,9 +108,47 @@ every merge. Resolve in this fork's favour for these:
 - `README.md` -- fork-specific content.
 - `docs/development.md`, `docs/security.md` -- fork-only files that should
   not exist upstream.
+- Support and documentation links -- `mint.json`, `docs/troubleshooting.mdx`,
+  `docs/reference/*.md`, and the URLs emitted by `src/cli/commands/init.ts`,
+  `src/cli/commands/worktrain-init.ts`,
+  `src/cli/commands/worktrain-diagnose.ts` and `src/config/config-file.ts`.
+  Upstream points these at its own repository; this fork points them at
+  `ikani-pdq/workrail`.
 
 When upstream renames things in `package.json` or restructures release
 config, do not auto-accept their version. Re-derive the fork's shape.
+
+`scripts/ci-policy-check.js` scans every tracked file and turns the `CI Policy`
+job red if a merge reintroduces a link to the upstream project, so a bad
+resolution on the bullet above surfaces in CI rather than in a user's bug
+report. The failure names the offending file and line.
+
+This does block the merge. `ci-success` inspects `needs['ci-policy'].result`
+and fails when it is not `success`, and `CI Success` is the required status
+check, so a red `CI Policy` holds the PR. The script asserts that wiring on
+itself: `ci-policy` is in its own `requiredNeeds` list, so removing the gate
+fails the very check the gate protects.
+
+When it fires, the first question is whether the link should be repointed at
+`ikani-pdq/workrail` -- that is almost always the answer. Widen
+`UPSTREAM_URL_ALLOWLIST` only for a reference that is deliberate and permanent,
+such as attribution or a record of what was true when written. Exemptions are
+whole-directory, so prefer fixing a link over adding one.
+
+There are two checks, and they fail differently. The first, above, asks whether
+any upstream URL survives outside `UPSTREAM_URL_ALLOWLIST`. The second asks
+whether a user is being sent upstream *for help* -- a link to upstream issues,
+discussions, pull requests, or security -- and being on `UPSTREAM_URL_ALLOWLIST`
+does not exempt that. `README.md`, for instance, is allowlisted whole-file so
+its attribution survives. A third check then covers the gap that leaves: every
+upstream reference in `README.md` must read as attribution, so a bare
+repository link carried in by a merge fails even though the file is exempt
+from the broad check. Upstream's own README footer carries exactly that shape.
+If you hit the message "a user is being sent upstream for help", widening
+`UPSTREAM_URL_ALLOWLIST` will not clear it; repoint the link. The much narrower
+`UPSTREAM_SUPPORT_ALLOWLIST` covers only the places where linking an upstream
+issue *is* the provenance being recorded, such as `docs/adrs/` and
+`docs/ideas/backlog.md`.
 
 ## Branch and commit conventions
 

@@ -15,6 +15,7 @@
  */
 
 import chalk from 'chalk';
+import { ISSUES_URL } from '../../constants/repository.js';
 
 // ---------------------------------------------------------------------------
 // DiagnosticResult -- discriminated union
@@ -939,7 +940,8 @@ function formatDefault(result: DiagnosticDefault, opts: FormatOptions): string {
     `  Raw:     ${result.rawEventLine.slice(0, 200)}`,
     ``,
     `  No automated fix suggestion available for this failure type.`,
-    `  File an issue: https://github.com/EtienneBBeaulac/workrail/issues`,
+    `  Before filing, check the lines above for paths or data you cannot share.`,
+    `  File an issue: ${ISSUES_URL}`,
     ``,
     formatMetricsLine(result.metrics),
     ``,

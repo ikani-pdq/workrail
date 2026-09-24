@@ -2,7 +2,6 @@
 
 >  **Common issues and solutions**
 
-[![Status](https://img.shields.io/badge/status-troubleshooting_guide-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
 ##  Table of Contents
@@ -96,10 +95,12 @@
 ## Getting Help
 
 - **Check documentation**: Review all guides in the `docs/` directory.
-- **Search issues**: Look for similar problems on GitHub.
-- **Ask for help**: Open a new issue with detailed logs and steps to reproduce.
-- **Contact maintainers**: See project README for contact info.
+- **Search issues**: Look for similar problems in
+  [`ikani-pdq/workrail`](https://github.com/ikani-pdq/workrail/issues).
+- **Ask for help**: Open a new issue with steps to reproduce. Include logs only
+  after reviewing them -- this repository is public. Do not include session
+  manifests, keyring contents, or pasted credentials in issue reports.
 
 ---
 
-**Still stuck?** Open an issue on GitHub or ask in the project discussion board for support. 
+**Still stuck?** Open an issue at [`ikani-pdq/workrail`](https://github.com/ikani-pdq/workrail/issues).
