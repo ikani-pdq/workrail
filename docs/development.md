@@ -118,12 +118,22 @@ every merge. Resolve in this fork's favour for these:
 When upstream renames things in `package.json` or restructures release
 config, do not auto-accept their version. Re-derive the fork's shape.
 
-`scripts/ci-policy-check.js` fails the build if a merge reintroduces a
-user-facing link to the upstream project, so a bad resolution on the bullet
-above surfaces in CI rather than in a user's bug report. The failure names the
-offending file and line. If the reference is deliberate -- attribution, or a
-record of what was true when written -- add its path to
-`UPSTREAM_URL_ALLOWLIST` in that script.
+`scripts/ci-policy-check.js` scans every tracked file and turns the `CI Policy`
+job red if a merge reintroduces a link to the upstream project, so a bad
+resolution on the bullet above surfaces in CI rather than in a user's bug
+report. The failure names the offending file and line.
+
+Note that this does not currently block the merge: `ci-success` lists
+`ci-policy` in its `needs` but never inspects `needs['ci-policy'].result`, and
+`CI Success` is the only required status check. Treat a red `CI Policy` as a
+stop signal rather than relying on the gate to enforce it.
+
+When it fires, the first question is whether the link should be repointed at
+`ikani-pdq/workrail` -- that is almost always the answer. Widen
+`UPSTREAM_URL_ALLOWLIST` only for a reference that is deliberate and permanent,
+such as attribution or a record of what was true when written. Note that
+`docs/design/` holds transient working papers, so an exemption there is broader
+than it looks.
 
 ## Branch and commit conventions
 

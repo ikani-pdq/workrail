@@ -84,4 +84,4 @@ tar xzf ./backups/workflows-YYYY-MM-DD.tar.gz -C ./workflows
 
 ---
 
-**Need help with recovery?** Check the [Troubleshooting Guide](troubleshooting.md) or create an issue on GitHub. 
+**Need help with recovery?** Check the [Troubleshooting Guide](troubleshooting.md) or open an issue at [`ikani-pdq/workrail`](https://github.com/ikani-pdq/workrail/issues).

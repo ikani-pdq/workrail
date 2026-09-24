@@ -67,24 +67,88 @@ const UPSTREAM_URL_ALLOWLIST = [
   'README.md',
 
   // Beyond #46, each protecting a specific known reference:
-  // triggers.yml is a protected file (AGENTS.md) whose commented examples
-  // reference upstream; tests/unit/worktrain-trigger-test.test.ts uses an
-  // upstream URL as parser fixture data.
+  // triggers.yml is a protected file (AGENTS.md) carrying the previous
+  // maintainer's live daemon config, which names upstream paths and accounts;
+  // tests/unit/worktrain-trigger-test.test.ts uses an upstream URL as parser
+  // fixture data.
   'triggers.yml',
   'tests/unit/worktrain-trigger-test.test.ts',
 
   // Two status badges whose href still names the upstream project's pre-rename
   // repo. Same shape as the two deleted from docs/reference/ in this change,
   // but docs/implementation/ is a declared non-goal of #46 -- tracked in #48.
-  // Exempted by exact path, not directory, so a new upstream URL anywhere else
-  // under docs/implementation/ is still caught.
+  // Exempted by exact path rather than by directory, so an upstream URL added
+  // elsewhere under docs/implementation/ is still caught -- with one known
+  // blind spot: 02-architecture.md and 04-testing-strategy.md carry the org
+  // inside a shields.io image src (img.shields.io/github/actions/...), which
+  // this pattern does not match and therefore does not need to exempt. #48
+  // covers those.
   'docs/implementation/09-simple-workflow-guide.md',
   'docs/implementation/13-advanced-validation-guide.md',
 ];
 
+// An allowlisted path may legitimately reference upstream -- attribution, an
+// ADR citing an upstream PR, provenance in the backlog. It may never route a
+// user to upstream for help, which is the actual failure issue #46 describes.
+// This narrower pattern is checked everywhere except the places where linking
+// an upstream issue IS the provenance being recorded.
+const UPSTREAM_SUPPORT_URL_PATTERN =
+  'github\\.com/(exaudeus|EtienneBBeaulac)/[A-Za-z0-9._-]+/(issues|discussions|pulls|security)';
+
+const UPSTREAM_SUPPORT_ALLOWLIST = [
+  'docs/adrs',
+  'docs/history',
+  'docs/design',
+  'docs/plans',
+  'design-docs',
+  'docs/ideas/backlog.md',
+  'triggers.yml',
+  'tests/unit/worktrain-trigger-test.test.ts',
+];
+
+// Returns { status, stdout }. git grep exit codes: 0 = matches found,
+// 1 = no matches, >1 = error. A match is a policy violation here, so 0 is the
+// failure case -- do not collapse this into a truthiness check.
+function runUpstreamGrep(pattern, allowlist) {
+  const args = ['grep', '-niE', pattern, '--', '.', ...allowlist.map((p) => `:!${p}`)];
+  try {
+    return { status: 0, stdout: execFileSync('git', args, { encoding: 'utf8' }) };
+  } catch (err) {
+    return {
+      status: typeof err.status === 'number' ? err.status : -1,
+      stdout: err.stdout || '',
+      detail: err.code || err.message,
+    };
+  }
+}
+
+function checkNoUpstreamSupportLinks() {
+  const { status, stdout, detail } = runUpstreamGrep(
+    UPSTREAM_SUPPORT_URL_PATTERN,
+    UPSTREAM_SUPPORT_ALLOWLIST
+  );
+
+  if (status === 1) return;
+
+  if (status === 0) {
+    fail(
+      'CI policy violation: a user is being sent upstream for help.\n' +
+        'These links route users to the upstream project\'s issue tracker or\n' +
+        'discussions. Repoint them at github.com/ikani-pdq/workrail. Being on\n' +
+        'an UPSTREAM_URL_ALLOWLIST path does not exempt a support destination.\n\n' +
+        stdout.trimEnd()
+    );
+  }
+
+  fail(
+    `CI policy violation: upstream support-link check could not run ` +
+      `(git grep exit ${status}${detail ? `: ${detail}` : ''})`
+  );
+}
+
 function checkNoUpstreamLinks() {
   const args = [
-    'grep', '-nE', UPSTREAM_URL_PATTERN, '--', '.',
+    'grep', '-niE', UPSTREAM_URL_PATTERN, '--', '.',
     ...UPSTREAM_URL_ALLOWLIST.map((p) => `:!${p}`),
   ];
 
@@ -176,6 +240,9 @@ function main() {
 
   // 7) Ensure no user-facing link points at the upstream project
   checkNoUpstreamLinks();
+
+  // 8) Ensure no allowlisted path routes a user upstream for help
+  checkNoUpstreamSupportLinks();
 
   console.log('CI policy check passed');
 }
