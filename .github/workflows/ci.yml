@@ -265,7 +265,7 @@ jobs:
         working-directory: console
 
       - name: Run security audit (root)
-        run: npm audit --audit-level=high
+        run: node --experimental-strip-types scripts/audit-check.ts
 
       - name: Run security audit (console/)
         run: npm audit --audit-level=high
