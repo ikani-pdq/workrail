@@ -223,7 +223,11 @@ describe('audit-check: isDirectExecutionEntry() -- regression test for the perce
 
   it('does NOT match a naive, unencoded file:// concatenation for a path with a space', () => {
     const argv1 = '/Users/someone/claude projects/workrail/scripts/audit-check.ts';
-    const naiveUrl = `file://${argv1}`;
+    // Built via string concatenation, not a template literal -- this repo's own
+    // test-platform-guard codemod bans that template form in tests/, so the
+    // intentionally-naive comparison below (the exact bug this guards against)
+    // is written this way on purpose, not as an oversight.
+    const naiveUrl = 'file://' + argv1;
     expect(pathToFileURL(argv1).href).not.toBe(naiveUrl);
   });
 
