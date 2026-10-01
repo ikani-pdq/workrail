@@ -85,11 +85,14 @@ type SectionResult =
 
 /**
  * Starter triggers.yml content.
- * Uses provider: generic (the only supported provider in MVP).
- * Workspace path is interpolated at generation time.
+ * Uses provider: generic for the starter trigger, as the simplest thing that
+ * works without external configuration. Workspace path is interpolated at
+ * generation time.
  *
- * WHY provider: generic only: polling (github/gitlab) is planned post-MVP.
- * The comment below instructs users to watch for the update.
+ * Polling providers (github_queue_poll, github_prs_poll, gitlab_poll) also
+ * exist -- see src/trigger/polling-scheduler.ts -- but they need credentials
+ * and repository configuration, so they are not what a starter file should
+ * hand someone.
  */
 function buildTriggersYml(workspacePath: string): string {
   return `# WorkRail trigger configuration
@@ -97,9 +100,6 @@ function buildTriggersYml(workspacePath: string): string {
 #
 # This file is read by the WorkRail daemon (workrail daemon --workspace <path>).
 # Add or edit triggers to control which workflows run and when.
-#
-# Polling triggers (github, gitlab) are coming in a future release.
-# See: https://github.com/exaudeus/workrail/blob/main/docs/triggers.md
 
 triggers:
   - id: my-first-trigger

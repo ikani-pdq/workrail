@@ -571,6 +571,14 @@ jobs:
             echo "- Lockfile Stable: ADVISORY (drift detected -- see artifact)" >> $GITHUB_STEP_SUMMARY
           fi
 
+          # Check CI policy guardrails
+          if [[ "${{ needs.ci-policy.result }}" != "success" ]]; then
+            echo "- CI Policy: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "CI policy check failed"
+            exit 1
+          fi
+          echo "- CI Policy: PASSED" >> $GITHUB_STEP_SUMMARY
+
           # Check build-artifact
           if [[ "${{ needs.build-artifact.result }}" != "success" ]]; then
             echo "- Build Artifact: FAILED" >> $GITHUB_STEP_SUMMARY

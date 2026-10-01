@@ -12,7 +12,9 @@
  * its own, independent of which install path was used to get there.
  */
 
-const EXPECTED_REPOSITORY_MARKER = 'github.com/ikani-pdq/workrail';
+import { REPOSITORY_MARKER } from '../constants/repository.js';
+
+const EXPECTED_REPOSITORY_MARKER = REPOSITORY_MARKER;
 
 export interface PackageProvenanceCheckResult {
   ok: boolean;
