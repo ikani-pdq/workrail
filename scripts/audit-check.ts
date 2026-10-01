@@ -241,6 +241,9 @@ function main(): void {
 // `file://${process.argv[1]}` comparison silently never matches on any path
 // containing characters that need encoding (this repo's own checkout path
 // has a space in it, which is exactly how this bug was first caught).
+// Known, accepted gap: Node resolves import.meta.url via realpath, so this
+// still won't match if the script is invoked through a symlink -- not fixed,
+// since neither CI nor the package.json script ever invoke it that way today.
 export function isDirectExecutionEntry(argv1: string | undefined, metaUrl: string): boolean {
   return argv1 !== undefined && metaUrl === pathToFileURL(argv1).href;
 }
