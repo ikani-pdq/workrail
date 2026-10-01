@@ -20,24 +20,24 @@ import * as path from 'node:path';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VENDORED_NPM_PREFIX = 'node_modules/npm/';
 
-type ViaObject = {
+export type ViaObject = {
   url: string;
   severity: string;
 };
-type Via = string | ViaObject;
+export type Via = string | ViaObject;
 
-type AuditFinding = {
+export type AuditFinding = {
   severity: string;
   via: Via[];
   nodes: string[];
 };
 
-type AuditJson = {
+export type AuditJson = {
   metadata: { vulnerabilities: Record<string, number> };
   vulnerabilities: Record<string, AuditFinding>;
 };
 
-type AllowlistEntry = {
+export type AllowlistEntry = {
   advisoryId: string;
   packageName: string;
   reason: string;
@@ -45,12 +45,12 @@ type AllowlistEntry = {
   reviewBy: string;
 };
 
-type AuditResult = { kind: 'pass' } | { kind: 'fail'; reasons: string[] };
+export type AuditResult = { kind: 'pass' } | { kind: 'fail'; reasons: string[] };
 
 // Each entry is one (advisoryId, packageName) pair -- a finding is only ever
 // exempted if its advisory AND package match an entry here, AND every
 // affected install path is under node_modules/npm/ (see isVendoredNpmPath).
-const ALLOWLIST: AllowlistEntry[] = [
+export const ALLOWLIST: AllowlistEntry[] = [
   {
     advisoryId: 'GHSA-qhr7-859c-m2p7',
     packageName: 'brace-expansion',
@@ -80,15 +80,15 @@ const ALLOWLIST: AllowlistEntry[] = [
   },
 ];
 
-function normalizeNodePath(nodePath: string): string {
+export function normalizeNodePath(nodePath: string): string {
   return nodePath.replace(/\\/g, '/').replace(/\/+$/, '') + '/';
 }
 
-function isVendoredNpmPath(nodePath: string): boolean {
+export function isVendoredNpmPath(nodePath: string): boolean {
   return normalizeNodePath(nodePath).startsWith(VENDORED_NPM_PREFIX);
 }
 
-function extractGhsaId(url: string): string | null {
+export function extractGhsaId(url: string): string | null {
   const match = /\/(GHSA-[A-Za-z0-9-]+)$/.exec(url);
   return match ? match[1] : null;
 }
@@ -101,7 +101,7 @@ function isHighOrCritical(severity: string): boolean {
   return severity === 'high' || severity === 'critical';
 }
 
-function isAuditJson(value: unknown): value is AuditJson {
+export function isAuditJson(value: unknown): value is AuditJson {
   if (typeof value !== 'object' || value === null) return false;
   const root = value as Record<string, unknown>;
   if (typeof root.vulnerabilities !== 'object' || root.vulnerabilities === null) return false;
@@ -110,7 +110,7 @@ function isAuditJson(value: unknown): value is AuditJson {
   return typeof metadata.vulnerabilities === 'object' && metadata.vulnerabilities !== null;
 }
 
-function evaluate(audit: AuditJson): AuditResult {
+export function evaluate(audit: AuditJson): AuditResult {
   const reasons: string[] = [];
 
   for (const [packageName, finding] of Object.entries(audit.vulnerabilities)) {
@@ -209,4 +209,9 @@ function main(): void {
   process.exit(result.kind === 'pass' ? 0 : 1);
 }
 
-main();
+// Only run when executed directly (`node audit-check.ts`) -- importing this
+// module (e.g. from a test) must not trigger a real npm audit + process.exit.
+const isDirectExecution = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+if (isDirectExecution) {
+  main();
+}
