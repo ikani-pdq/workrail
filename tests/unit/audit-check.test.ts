@@ -1,10 +1,15 @@
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   ALLOWLIST,
+  describeAuditJsonShapeError,
   evaluate,
   extractGhsaId,
   isAuditJson,
+  isDirectExecutionEntry,
   isVendoredNpmPath,
+  loadAndEvaluate,
+  obtainAuditJsonText,
   type AuditFinding,
   type AuditJson,
 } from '../../scripts/audit-check.ts';
@@ -178,5 +183,111 @@ describe('audit-check: isVendoredNpmPath() path normalization', () => {
 
   it('rejects an unrelated top-level path', () => {
     expect(isVendoredNpmPath('node_modules/undici')).toBe(false);
+  });
+});
+
+describe('audit-check: describeAuditJsonShapeError() field-level messages', () => {
+  it('names the actual type when given a non-object', () => {
+    expect(describeAuditJsonShapeError('not an object')).toMatch(/expected an object, got string/);
+  });
+
+  it('names "vulnerabilities" specifically when it is missing', () => {
+    expect(describeAuditJsonShapeError({ metadata: { vulnerabilities: {} } })).toMatch(/"vulnerabilities"/);
+  });
+
+  it('names "metadata" specifically when it is missing', () => {
+    expect(describeAuditJsonShapeError({ vulnerabilities: {} })).toMatch(/"metadata"/);
+  });
+
+  it('names "metadata.vulnerabilities" specifically when it is the wrong type', () => {
+    expect(describeAuditJsonShapeError({ vulnerabilities: {}, metadata: { vulnerabilities: 'nope' } })).toMatch(
+      /"metadata\.vulnerabilities"/,
+    );
+  });
+
+  it('returns null for a valid shape', () => {
+    expect(describeAuditJsonShapeError(REAL_AUDIT_JSON_CURRENT)).toBeNull();
+  });
+});
+
+describe('audit-check: isDirectExecutionEntry() -- regression test for the percent-encoding bug', () => {
+  it('matches when argv[1] and import.meta.url refer to the same plain path', () => {
+    const argv1 = '/repo/scripts/audit-check.ts';
+    expect(isDirectExecutionEntry(argv1, pathToFileURL(argv1).href)).toBe(true);
+  });
+
+  it('matches when the path contains a space -- this exact case silently failed before the fix', () => {
+    const argv1 = '/Users/someone/claude projects/workrail/scripts/audit-check.ts';
+    expect(isDirectExecutionEntry(argv1, pathToFileURL(argv1).href)).toBe(true);
+  });
+
+  it('does NOT match a naive, unencoded file:// concatenation for a path with a space', () => {
+    const argv1 = '/Users/someone/claude projects/workrail/scripts/audit-check.ts';
+    const naiveUrl = `file://${argv1}`;
+    expect(pathToFileURL(argv1).href).not.toBe(naiveUrl);
+  });
+
+  it('does not match when argv[1] is undefined (e.g. a REPL or unusual invocation)', () => {
+    expect(isDirectExecutionEntry(undefined, pathToFileURL('/repo/scripts/audit-check.ts').href)).toBe(false);
+  });
+
+  it('does not match an unrelated module url', () => {
+    const argv1 = '/repo/scripts/audit-check.ts';
+    expect(isDirectExecutionEntry(argv1, pathToFileURL('/repo/scripts/some-other-file.ts').href)).toBe(false);
+  });
+});
+
+describe('audit-check: obtainAuditJsonText() / loadAndEvaluate() I/O-boundary discrimination', () => {
+  it('treats a clean exit (no throw) as usable output', () => {
+    const runner = () => JSON.stringify(REAL_AUDIT_JSON_CURRENT);
+    expect(obtainAuditJsonText(runner)).toEqual({ ok: true, text: JSON.stringify(REAL_AUDIT_JSON_CURRENT) });
+  });
+
+  it('treats exit 1 with non-empty stdout as the normal "findings exist" case, not a failure', () => {
+    const runner = (): string => {
+      throw { status: 1, signal: null, stdout: JSON.stringify(REAL_AUDIT_JSON_CURRENT), message: 'Command failed' };
+    };
+    expect(obtainAuditJsonText(runner)).toEqual({ ok: true, text: JSON.stringify(REAL_AUDIT_JSON_CURRENT) });
+  });
+
+  it('fails closed on a non-1 exit status', () => {
+    const runner = (): string => {
+      throw { status: 127, signal: null, stdout: '', message: 'npm: command not found' };
+    };
+    const result = obtainAuditJsonText(runner);
+    expect(result.ok).toBe(false);
+  });
+
+  it('fails closed when killed by a signal (e.g. the configured timeout), even though status is null', () => {
+    const runner = (): string => {
+      throw { status: null, signal: 'SIGTERM', stdout: '', message: 'Command timed out' };
+    };
+    const result = obtainAuditJsonText(runner);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason).toMatch(/SIGTERM/);
+  });
+
+  it('fails closed on exit 1 with empty stdout', () => {
+    const runner = (): string => {
+      throw { status: 1, signal: null, stdout: '', message: 'Command failed' };
+    };
+    expect(obtainAuditJsonText(runner).ok).toBe(false);
+  });
+
+  it('loadAndEvaluate() passes end-to-end through an injected runner when only allowlisted findings exist', () => {
+    const runner = () => JSON.stringify(REAL_AUDIT_JSON_CURRENT);
+    expect(loadAndEvaluate(runner)).toEqual({ kind: 'pass' });
+  });
+
+  it('loadAndEvaluate() fails end-to-end on malformed JSON from the runner', () => {
+    const runner = () => 'not valid json{{{';
+    expect(loadAndEvaluate(runner).kind).toBe('fail');
+  });
+
+  it('loadAndEvaluate() fails end-to-end when the runner throws a boundary error', () => {
+    const runner = (): string => {
+      throw { status: null, signal: 'SIGTERM', stdout: '', message: 'timed out' };
+    };
+    expect(loadAndEvaluate(runner).kind).toBe('fail');
   });
 });

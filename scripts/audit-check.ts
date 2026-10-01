@@ -14,7 +14,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as path from 'node:path';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,12 +102,25 @@ function isHighOrCritical(severity: string): boolean {
 }
 
 export function isAuditJson(value: unknown): value is AuditJson {
-  if (typeof value !== 'object' || value === null) return false;
+  return describeAuditJsonShapeError(value) === null;
+}
+
+// Separate from the isAuditJson type-guard so a real CI failure log can say
+// exactly which field was wrong, instead of just "shape didn't match".
+export function describeAuditJsonShapeError(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return `expected an object, got ${typeof value}`;
   const root = value as Record<string, unknown>;
-  if (typeof root.vulnerabilities !== 'object' || root.vulnerabilities === null) return false;
-  if (typeof root.metadata !== 'object' || root.metadata === null) return false;
+  if (typeof root.vulnerabilities !== 'object' || root.vulnerabilities === null) {
+    return `expected "vulnerabilities" to be an object, got ${typeof root.vulnerabilities}`;
+  }
+  if (typeof root.metadata !== 'object' || root.metadata === null) {
+    return `expected "metadata" to be an object, got ${typeof root.metadata}`;
+  }
   const metadata = root.metadata as Record<string, unknown>;
-  return typeof metadata.vulnerabilities === 'object' && metadata.vulnerabilities !== null;
+  if (typeof metadata.vulnerabilities !== 'object' || metadata.vulnerabilities === null) {
+    return `expected "metadata.vulnerabilities" to be an object, got ${typeof metadata.vulnerabilities}`;
+  }
+  return null;
 }
 
 export function evaluate(audit: AuditJson): AuditResult {
@@ -150,15 +163,26 @@ export function evaluate(audit: AuditJson): AuditResult {
   return reasons.length === 0 ? { kind: 'pass' } : { kind: 'fail', reasons };
 }
 
-function obtainAuditJsonText(): { ok: true; text: string } | { ok: false; reason: string } {
+// Returns npm audit's stdout text, mimicking execFileSync: returns on exit 0,
+// throws (with .status/.signal/.stdout) on non-zero exit. Injectable so tests
+// can exercise the exit-code/JSON-shape boundary logic below without actually
+// shelling out to npm.
+export type NpmAuditRunner = () => string;
+
+function runRealNpmAudit(): string {
+  return execFileSync('npm', ['audit', '--json'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout: 120_000,
+    maxBuffer: 20 * 1024 * 1024,
+  });
+}
+
+export function obtainAuditJsonText(
+  runner: NpmAuditRunner = runRealNpmAudit,
+): { ok: true; text: string } | { ok: false; reason: string } {
   try {
-    const text = execFileSync('npm', ['audit', '--json'], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      timeout: 120_000,
-      maxBuffer: 20 * 1024 * 1024,
-    });
-    return { ok: true, text };
+    return { ok: true, text: runner() };
   } catch (error) {
     // npm audit exits 1 whenever any finding exists -- that is the normal case,
     // not a failure to run. Only treat it as a boundary failure if the exit
@@ -174,8 +198,8 @@ function obtainAuditJsonText(): { ok: true; text: string } | { ok: false; reason
   }
 }
 
-function loadAndEvaluate(): AuditResult {
-  const obtained = obtainAuditJsonText();
+export function loadAndEvaluate(runner: NpmAuditRunner = runRealNpmAudit): AuditResult {
+  const obtained = obtainAuditJsonText(runner);
   if (!obtained.ok) {
     return { kind: 'fail', reasons: [obtained.reason] };
   }
@@ -187,11 +211,12 @@ function loadAndEvaluate(): AuditResult {
     return { kind: 'fail', reasons: [`npm audit output was not valid JSON: ${(error as Error).message}`] };
   }
 
-  if (!isAuditJson(parsed)) {
-    return { kind: 'fail', reasons: ['npm audit --json output did not match the expected shape'] };
+  const shapeError = describeAuditJsonShapeError(parsed);
+  if (shapeError !== null) {
+    return { kind: 'fail', reasons: [`npm audit --json output did not match the expected shape: ${shapeError}`] };
   }
 
-  return evaluate(parsed);
+  return evaluate(parsed as AuditJson);
 }
 
 function main(): void {
@@ -211,7 +236,15 @@ function main(): void {
 
 // Only run when executed directly (`node audit-check.ts`) -- importing this
 // module (e.g. from a test) must not trigger a real npm audit + process.exit.
-const isDirectExecution = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
-if (isDirectExecution) {
+// Compares resolved file:// URLs rather than raw strings: import.meta.url is
+// percent-encoded (e.g. spaces -> %20), but process.argv[1] is not, so a naive
+// `file://${process.argv[1]}` comparison silently never matches on any path
+// containing characters that need encoding (this repo's own checkout path
+// has a space in it, which is exactly how this bug was first caught).
+export function isDirectExecutionEntry(argv1: string | undefined, metaUrl: string): boolean {
+  return argv1 !== undefined && metaUrl === pathToFileURL(argv1).href;
+}
+
+if (isDirectExecutionEntry(process.argv[1], import.meta.url)) {
   main();
 }
