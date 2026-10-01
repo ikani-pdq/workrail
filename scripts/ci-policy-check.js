@@ -70,9 +70,12 @@ const UPSTREAM_URL_ALLOWLIST = [
   // triggers.yml is a protected file (AGENTS.md) carrying the previous
   // maintainer's live daemon config, which names upstream paths and accounts;
   // tests/unit/worktrain-trigger-test.test.ts uses an upstream URL as parser
-  // fixture data.
+  // fixture data; tests/architecture/no-upstream-support-links.test.ts is this
+  // very guard's regression test, and its fixtures must contain real upstream
+  // URLs to prove the guard still catches them.
   'triggers.yml',
   'tests/unit/worktrain-trigger-test.test.ts',
+  'tests/architecture/no-upstream-support-links.test.ts',
 
   // Two status badges whose href still names the upstream project's pre-rename
   // repo. Same shape as the two deleted from docs/reference/ in this change,
@@ -106,6 +109,7 @@ const UPSTREAM_SUPPORT_ALLOWLIST = [
   'docs/ideas/backlog.md',
   'triggers.yml',
   'tests/unit/worktrain-trigger-test.test.ts',
+  'tests/architecture/no-upstream-support-links.test.ts',
 ];
 
 // Returns { status, stdout }. git grep exit codes: 0 = matches found,
