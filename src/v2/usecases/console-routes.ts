@@ -283,7 +283,7 @@ export function mountConsoleRoutes(
     'signal_emitted',  // emitted by signal_coordinator tool
   ]);
 
-  app.get('/api/v2/sessions/:sessionId/events', async (req: Request, res: Response) => {
+  app.get('/api/v2/sessions/:sessionId/events', async (req: Request<{ sessionId: string }>, res: Response) => {
     const { sessionId } = req.params;
 
     // Validate session exists before opening SSE stream.
@@ -643,7 +643,7 @@ export function mountConsoleRoutes(
   });
 
   // Get session detail with full DAG
-  app.get('/api/v2/sessions/:sessionId', async (req: Request, res: Response) => {
+  app.get('/api/v2/sessions/:sessionId', async (req: Request<{ sessionId: string }>, res: Response) => {
     const { sessionId } = req.params;
     const result = await consoleService.getSessionDetail(sessionId);
     result.match(
@@ -656,7 +656,7 @@ export function mountConsoleRoutes(
   });
 
   // Get node detail within a session
-  app.get('/api/v2/sessions/:sessionId/nodes/:nodeId', async (req: Request, res: Response) => {
+  app.get('/api/v2/sessions/:sessionId/nodes/:nodeId', async (req: Request<{ sessionId: string; nodeId: string }>, res: Response) => {
     const { sessionId, nodeId } = req.params;
     const result = await consoleService.getNodeDetail(sessionId, nodeId);
     result.match(
@@ -700,7 +700,7 @@ export function mountConsoleRoutes(
     return sys.startsWith('spawn'); // ENOENT/EACCES from spawn (bad cwd or missing binary)
   }
 
-  app.get('/api/v2/sessions/:sessionId/diff-summary', async (req: Request, res: Response) => {
+  app.get('/api/v2/sessions/:sessionId/diff-summary', async (req: Request<{ sessionId: string }>, res: Response) => {
     const { sessionId } = req.params;
 
     // Load session detail to get metrics (SHAs) and repoRoot.
@@ -797,7 +797,7 @@ export function mountConsoleRoutes(
       }
     });
 
-    app.get('/api/v2/workflows/:workflowId', async (req: Request, res: Response) => {
+    app.get('/api/v2/workflows/:workflowId', async (req: Request<{ workflowId: string }>, res: Response) => {
       const { workflowId } = req.params;
       try {
         const workflow = await workflowService.getWorkflowById(workflowId);
