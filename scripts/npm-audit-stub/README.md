@@ -43,6 +43,17 @@ If a future dependency bump changes how `@semantic-release/npm` gets hoisted,
 resolving to the wrong place -- re-derive the path count by checking where
 `node_modules/@semantic-release/npm` actually lands.
 
+## `npm sbom` needs `--omit=dev`
+
+`npm sbom` (unlike `npm install`/`npm ci`/`npm audit`) treats this override as
+"invalid" and refuses to run with `ESBOMPROBLEMS`, because the resolved
+package came from `file:` rather than the registry range
+`@semantic-release/npm` declared -- true regardless of what version number
+the stub claims (tested: pinning it to `11.6.2`, which satisfies
+`@semantic-release/npm`'s `^11.6.2`, made no difference). CI's SBOM step
+passes `--omit=dev` to route around this, which also means the generated SBOM
+describes what actually ships rather than the whole dev/build toolchain.
+
 ## Verifying this stays safe
 
 ```bash
