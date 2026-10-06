@@ -37,19 +37,35 @@ export type AuditJson = {
   vulnerabilities: Record<string, AuditFinding>;
 };
 
+// 'vendored-npm-bundle': exempted only when every affected install path is
+// under node_modules/npm/ (see isVendoredNpmPath) -- the original #50/#51
+// category.
+// 'dev-tooling-no-fix': no upstream fix exists anywhere in the package's
+// dependency chain, and the package's install paths are confirmed (by the
+// author, at entry-authoring time, cited in `reason`) to be reachable only
+// from devDependencies -- never a production `dependencies` edge. Unlike
+// 'vendored-npm-bundle', this claim is NOT re-verified at runtime (doing so
+// would require evaluate() to read package.json/the dependency tree, which
+// is new I/O this module deliberately avoids to stay a pure function of
+// AuditJson) -- each new addedOn/reviewBy review of a dev-tooling-no-fix
+// entry must re-confirm the dev-only claim by hand.
+export type AllowlistScope = 'vendored-npm-bundle' | 'dev-tooling-no-fix';
+
 export type AllowlistEntry = {
   advisoryId: string;
   packageName: string;
   reason: string;
   addedOn: string;
   reviewBy: string;
+  scope: AllowlistScope;
 };
 
 export type AuditResult = { kind: 'pass' } | { kind: 'fail'; reasons: string[] };
 
 // Each entry is one (advisoryId, packageName) pair -- a finding is only ever
-// exempted if its advisory AND package match an entry here, AND every
-// affected install path is under node_modules/npm/ (see isVendoredNpmPath).
+// exempted if its advisory AND package match an entry here, AND (for
+// 'vendored-npm-bundle' entries) every affected install path is under
+// node_modules/npm/ (see isVendoredNpmPath).
 export const ALLOWLIST: AllowlistEntry[] = [
   {
     advisoryId: 'GHSA-qhr7-859c-m2p7',
@@ -60,6 +76,7 @@ export const ALLOWLIST: AllowlistEntry[] = [
       '@semantic-release/npm@13.2.0 -- both still vendor the vulnerable version). See issue #50.',
     addedOn: '2026-10-01',
     reviewBy: '2026-11-01',
+    scope: 'vendored-npm-bundle',
   },
   {
     advisoryId: 'GHSA-6j4f-fj2g-mc7p',
@@ -67,6 +84,7 @@ export const ALLOWLIST: AllowlistEntry[] = [
     reason: 'Same vendored npm bundle as GHSA-qhr7-859c-m2p7 above -- see that entry and issue #50.',
     addedOn: '2026-10-01',
     reviewBy: '2026-11-01',
+    scope: 'vendored-npm-bundle',
   },
   {
     advisoryId: 'GHSA-rfgv-xxqx-mfg5',
@@ -77,6 +95,57 @@ export const ALLOWLIST: AllowlistEntry[] = [
       '(already patched separately). See issue #50.',
     addedOn: '2026-10-01',
     reviewBy: '2026-11-01',
+    scope: 'vendored-npm-bundle',
+  },
+  {
+    advisoryId: 'GHSA-ch52-4w7c-c8xp',
+    packageName: 'http-cache-semantics',
+    reason:
+      "Vendored inside npm's own bundleDependencies via make-fetch-happen (semantic-release -> " +
+      '@semantic-release/npm -> npm). Same vendored-bundle shape as the brace-expansion/undici entries ' +
+      'above -- see issue #50. No npm release fixes this as of 2026-10-06 (checked npm@11.21.0, still ' +
+      'vendors the vulnerable version). See issue #54.',
+    addedOn: '2026-10-06',
+    reviewBy: '2026-11-06',
+    scope: 'vendored-npm-bundle',
+  },
+  {
+    advisoryId: 'GHSA-vfj7-8cjw-p6xm',
+    packageName: 'braces',
+    reason:
+      'Stack-exhaustion DoS via deeply nested brace patterns. No upstream fix exists anywhere in its ' +
+      'dependency chain as of 2026-10-06: braces has never published a patched release past the ' +
+      'vulnerable 3.0.3 (checked `npm view braces versions`); micromatch@4.0.8 (latest) still requires ' +
+      'braces@^3.0.3; chokidar@5.0.0 (latest) finally drops braces, but nodemon@3.1.14 (latest) still ' +
+      'pins chokidar@^3.5.2. Confirmed reachable only from devDependencies -- never a production ' +
+      "`dependencies` edge (`npm ls braces --omit=dev` returns empty). Used only by nodemon's dev " +
+      "file-watcher chain and semantic-release's/micromatch's commit-message glob matching, never in " +
+      'production runtime code. See issue #54.',
+    addedOn: '2026-10-06',
+    reviewBy: '2026-11-06',
+    scope: 'dev-tooling-no-fix',
+  },
+  {
+    advisoryId: 'GHSA-5gmw-xhrv-c9v3',
+    packageName: 'tinypool',
+    reason:
+      'Prototype-pollution gadget in worker options leading to remote code execution (RCE class, not a ' +
+      'DoS -- reviewBy set sooner than the usual ~1 month given this severity). Fix requires a major ' +
+      'vitest bump (vitest@5.0.3) tracked as a follow-up, not done here. Confirmed reachable only from ' +
+      'devDependencies -- never a production `dependencies` edge (`npm ls tinypool --omit=dev` returns ' +
+      "empty); tinypool is only vitest's internal worker-pool implementation, never invoked outside the " +
+      'test run itself. See issue #54 and the tracked vitest-v5-upgrade follow-up.',
+    addedOn: '2026-10-06',
+    reviewBy: '2026-10-20',
+    scope: 'dev-tooling-no-fix',
+  },
+  {
+    advisoryId: 'GHSA-85c8-ppgw-ccpr',
+    packageName: 'tinypool',
+    reason: 'Same RCE-class prototype-pollution gadget family as GHSA-5gmw-xhrv-c9v3 above -- see that entry.',
+    addedOn: '2026-10-06',
+    reviewBy: '2026-10-20',
+    scope: 'dev-tooling-no-fix',
   },
 ];
 
@@ -93,12 +162,18 @@ export function extractGhsaId(url: string): string | null {
   return match ? match[1] : null;
 }
 
-function isAllowlisted(advisoryId: string, packageName: string): boolean {
-  return ALLOWLIST.some((entry) => entry.advisoryId === advisoryId && entry.packageName === packageName);
+function findAllowlistEntry(advisoryId: string, packageName: string): AllowlistEntry | undefined {
+  return ALLOWLIST.find((entry) => entry.advisoryId === advisoryId && entry.packageName === packageName);
 }
 
 function isHighOrCritical(severity: string): boolean {
   return severity === 'high' || severity === 'critical';
+}
+
+function isWellFormedViaObject(via: unknown): via is ViaObject {
+  if (typeof via !== 'object' || via === null) return false;
+  const candidate = via as Record<string, unknown>;
+  return typeof candidate.severity === 'string' && typeof candidate.url === 'string';
 }
 
 export function isAuditJson(value: unknown): value is AuditJson {
@@ -123,6 +198,111 @@ export function describeAuditJsonShapeError(value: unknown): string | null {
   return null;
 }
 
+export type ResolvedAdvisory = {
+  advisoryId: string;
+  packageName: string;
+  nodes: string[];
+};
+
+export type ViaResolution =
+  | { kind: 'resolved'; advisories: ResolvedAdvisory[] }
+  | { kind: 'unresolvable'; packageName: string };
+
+// Resolves a bare dependency-name `via` reference (npm audit's representation
+// of an indirect finding) down to the real GHSA-bearing advisory object(s) it
+// ultimately points to, by looking the name up in the same audit payload and
+// recursing into its own `via` entries.
+//
+// Cycle-safety invariant this function depends on: `vulnerabilities` is an
+// immutable snapshot for the lifetime of one top-level resolution call, so
+// looking up the same package name twice always returns the identical `via`
+// array -- a second visit can never surface information the first visit
+// didn't already see. Cutting off re-traversal on `visited.has(packageName)`
+// therefore only prunes redundant work; it can never hide an advisory,
+// because a node's own direct (GHSA-object) `via` entries are always
+// collected unconditionally when that node is first expanded, independent of
+// whether a sibling `via` entry on the same node is a cyclic back-reference.
+// A cycle therefore contributes zero *additional* advisories but is NOT
+// itself a failure -- only a name absent from `vulnerabilities` entirely, an
+// empty `via` array, or a malformed `via` entry shape is genuinely
+// unresolvable and fails closed.
+export function resolveVia(
+  packageName: string,
+  vulnerabilities: Record<string, AuditFinding>,
+  visited: Set<string>,
+): ViaResolution {
+  if (visited.has(packageName)) {
+    return { kind: 'resolved', advisories: [] };
+  }
+
+  const finding = vulnerabilities[packageName];
+  if (!finding || finding.via.length === 0) {
+    return { kind: 'unresolvable', packageName };
+  }
+
+  const nextVisited = new Set(visited);
+  nextVisited.add(packageName);
+
+  const advisories: ResolvedAdvisory[] = [];
+  for (const via of finding.via) {
+    if (typeof via === 'string') {
+      const sub = resolveVia(via, vulnerabilities, nextVisited);
+      if (sub.kind === 'unresolvable') return sub;
+      advisories.push(...sub.advisories);
+      continue;
+    }
+    if (!isWellFormedViaObject(via)) {
+      return { kind: 'unresolvable', packageName };
+    }
+    if (!isHighOrCritical(via.severity)) continue;
+    const advisoryId = extractGhsaId(via.url);
+    if (!advisoryId) {
+      return { kind: 'unresolvable', packageName };
+    }
+    advisories.push({ advisoryId, packageName, nodes: finding.nodes ?? [] });
+  }
+
+  return { kind: 'resolved', advisories };
+}
+
+function describeUnreachableScope(scope: never): string {
+  return `unrecognized allowlist scope "${String(scope)}" -- failing closed`;
+}
+
+// Checks one resolved advisory (whether extracted directly from a package's
+// own `via` object, or surfaced via resolveVia's chain resolution) against
+// the allowlist. Always appends to `reasons` on failure; never throws.
+function checkAdvisoryAgainstAllowlist(adv: ResolvedAdvisory, reasons: string[]): void {
+  if (adv.nodes.length === 0) {
+    reasons.push(`${adv.packageName}: high/critical finding has no install paths listed -- failing closed`);
+    return;
+  }
+
+  const entry = findAllowlistEntry(adv.advisoryId, adv.packageName);
+  if (!entry) {
+    reasons.push(`${adv.packageName} (${adv.advisoryId}): high/critical finding is not in the allowlist`);
+    return;
+  }
+
+  switch (entry.scope) {
+    case 'vendored-npm-bundle': {
+      if (!adv.nodes.every(isVendoredNpmPath)) {
+        reasons.push(
+          `${adv.packageName} (${adv.advisoryId}): affects a non-vendored install path (${adv.nodes.join(', ')})`,
+        );
+      }
+      return;
+    }
+    case 'dev-tooling-no-fix':
+      // No upstream fix exists and the package is confirmed reachable only
+      // from devDependencies (see the `scope` type's own doc comment) -- no
+      // install-path requirement applies.
+      return;
+    default:
+      reasons.push(`${adv.packageName} (${adv.advisoryId}): ${describeUnreachableScope(entry.scope)}`);
+  }
+}
+
 export function evaluate(audit: AuditJson): AuditResult {
   const reasons: string[] = [];
 
@@ -134,13 +314,40 @@ export function evaluate(audit: AuditJson): AuditResult {
       reasons.push(`${packageName}: ${finding.severity} finding has no install paths listed -- failing closed`);
       continue;
     }
-    const allNodesVendored = nodes.every(isVendoredNpmPath);
+    if (finding.via.length === 0) {
+      reasons.push(`${packageName}: ${finding.severity} finding has no "via" entries listed -- failing closed`);
+      continue;
+    }
+
+    // A high/critical finding must trace back to at least one real,
+    // checked advisory somewhere in its via graph -- a finding whose every
+    // branch bottoms out in nothing (e.g. a cycle with no other branch ever
+    // contributing a real GHSA-bearing object) has no evidence backing its
+    // severity at all, and must fail closed rather than silently pass. Only
+    // applies when no other, more specific reason already explains the
+    // failure (tracked via reasonsBeforePackage) -- avoids a redundant
+    // second reason alongside e.g. an unresolvable/malformed via message.
+    const reasonsBeforePackage = reasons.length;
+    let anyAdvisoryChecked = false;
 
     for (const via of finding.via) {
       if (typeof via === 'string') {
-        reasons.push(
-          `${packageName}: a "via" entry is a bare dependency-name reference ("${via}"), not a direct advisory -- failing closed`,
-        );
+        const resolution = resolveVia(via, audit.vulnerabilities, new Set([packageName]));
+        if (resolution.kind === 'unresolvable') {
+          reasons.push(
+            `${packageName}: a "via" entry is a bare dependency-name reference ("${via}"), not a direct advisory -- failing closed`,
+          );
+          continue;
+        }
+        for (const adv of resolution.advisories) {
+          anyAdvisoryChecked = true;
+          checkAdvisoryAgainstAllowlist(adv, reasons);
+        }
+        continue;
+      }
+
+      if (!isWellFormedViaObject(via)) {
+        reasons.push(`${packageName}: a "via" entry has an unrecognized shape -- failing closed`);
         continue;
       }
       if (!isHighOrCritical(via.severity)) continue;
@@ -150,13 +357,14 @@ export function evaluate(audit: AuditJson): AuditResult {
         reasons.push(`${packageName}: could not extract a GHSA id from advisory url "${via.url}" -- failing closed`);
         continue;
       }
-      if (!allNodesVendored) {
-        reasons.push(`${packageName} (${advisoryId}): affects a non-vendored install path (${nodes.join(', ')})`);
-        continue;
-      }
-      if (!isAllowlisted(advisoryId, packageName)) {
-        reasons.push(`${packageName} (${advisoryId}): high/critical finding is not in the allowlist`);
-      }
+      anyAdvisoryChecked = true;
+      checkAdvisoryAgainstAllowlist({ advisoryId, packageName, nodes }, reasons);
+    }
+
+    if (!anyAdvisoryChecked && reasons.length === reasonsBeforePackage) {
+      reasons.push(
+        `${packageName}: ${finding.severity} finding never resolved to any checkable advisory -- failing closed`,
+      );
     }
   }
 
