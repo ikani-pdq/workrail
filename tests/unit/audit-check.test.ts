@@ -10,10 +10,15 @@ import {
   isVendoredNpmPath,
   loadAndEvaluate,
   obtainAuditJsonText,
+  resolveVia,
   type AuditFinding,
   type AuditJson,
 } from '../../scripts/audit-check.ts';
-import { REAL_AUDIT_JSON_CURRENT } from './fixtures/audit-check.fixture.ts';
+import {
+  KNOWN_GOOD_DEV_TOOLING_NO_FIX_PATHS,
+  REAL_AUDIT_JSON_CURRENT,
+  REAL_AUDIT_JSON_WITH_BRACES_CHAIN,
+} from './fixtures/audit-check.fixture.ts';
 
 function auditJson(vulnerabilities: Record<string, AuditFinding>): AuditJson {
   return {
@@ -130,6 +135,229 @@ describe('audit-check: evaluate()', () => {
       }),
     );
     expect(result).toEqual({ kind: 'pass' });
+  });
+});
+
+describe('audit-check: evaluate() -- bare-via chain resolution (issue #54)', () => {
+  it('collects a direct advisory even when a sibling via entry is a cyclic back-reference', () => {
+    const result = evaluate(
+      auditJson({
+        mid: {
+          severity: 'high',
+          nodes: ['node_modules/npm/node_modules/mid'],
+          via: ['cyclic-peer', 'brace-expansion'],
+        },
+        'cyclic-peer': {
+          severity: 'high',
+          nodes: ['node_modules/cyclic-peer'],
+          via: ['mid'],
+        },
+        'brace-expansion': {
+          severity: 'high',
+          nodes: ['node_modules/npm/node_modules/brace-expansion'],
+          via: [{ severity: 'high', url: `https://github.com/advisories/${ALLOWLISTED_BRACE_EXPANSION.advisoryId}` }],
+        },
+      }),
+    );
+    expect(result).toEqual({ kind: 'pass' });
+  });
+
+  it('does not let one allowlisted-resolvable via branch silently clear a distinct, non-allowlisted advisory on a sibling branch', () => {
+    const result = evaluate(
+      auditJson({
+        dual: {
+          severity: 'high',
+          nodes: ['node_modules/dual'],
+          via: ['undici', 'bad-leaf'],
+        },
+        undici: {
+          severity: 'high',
+          nodes: ['node_modules/npm/node_modules/undici'],
+          via: [{ severity: 'high', url: `https://github.com/advisories/${ALLOWLISTED_UNDICI.advisoryId}` }],
+        },
+        'bad-leaf': {
+          severity: 'high',
+          nodes: ['node_modules/npm/node_modules/bad-leaf'],
+          via: [{ severity: 'high', url: 'https://github.com/advisories/GHSA-0000-0000-0001' }],
+        },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/GHSA-0000-0000-0001.*not in the allowlist/);
+  });
+
+  it('fails closed on a malformed via entry shape at the top level', () => {
+    const malformed = {
+      severity: 'high',
+      nodes: ['node_modules/some-pkg'],
+      via: [{ notSeverityOrUrl: true }],
+    } as unknown as AuditFinding;
+    const result = evaluate(auditJson({ 'some-pkg': malformed }));
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/unrecognized shape/);
+  });
+
+  it('fails closed on a malformed via entry shape reached through chain resolution', () => {
+    const result = evaluate(
+      auditJson({
+        outer: { severity: 'high', nodes: ['node_modules/outer'], via: ['chained-malformed'] },
+        'chained-malformed': {
+          severity: 'high',
+          nodes: ['node_modules/chained-malformed'],
+          via: [{ notSeverityOrUrl: true }] as unknown as AuditFinding['via'],
+        },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/bare dependency-name reference/);
+  });
+
+  it('fails closed when a resolved package has a genuinely empty via array', () => {
+    const result = evaluate(
+      auditJson({
+        outer: { severity: 'high', nodes: ['node_modules/outer'], via: ['empty-leaf'] },
+        'empty-leaf': { severity: 'high', nodes: ['node_modules/empty-leaf'], via: [] },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/bare dependency-name reference/);
+  });
+
+  it('resolves two independent top-level packages into the same shared leaf without a false cycle (diamond shape)', () => {
+    const result = evaluate(
+      auditJson({
+        'diamond-a': { severity: 'high', nodes: ['node_modules/diamond-a'], via: ['brace-expansion'] },
+        'diamond-b': { severity: 'high', nodes: ['node_modules/diamond-b'], via: ['brace-expansion'] },
+        'brace-expansion': {
+          severity: 'high',
+          nodes: ['node_modules/npm/node_modules/brace-expansion'],
+          via: [{ severity: 'high', url: `https://github.com/advisories/${ALLOWLISTED_BRACE_EXPANSION.advisoryId}` }],
+        },
+      }),
+    );
+    expect(result).toEqual({ kind: 'pass' });
+  });
+
+  it('still requires a vendored install path for a vendored-npm-bundle entry reached via chain resolution', () => {
+    const result = evaluate(
+      auditJson({
+        outer: { severity: 'high', nodes: ['node_modules/outer'], via: ['undici'] },
+        undici: {
+          severity: 'high',
+          nodes: ['node_modules/undici'],
+          via: [{ severity: 'high', url: `https://github.com/advisories/${ALLOWLISTED_UNDICI.advisoryId}` }],
+        },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/non-vendored install path/);
+  });
+
+  it('fails closed on a pure cycle with no real advisory reachable through any branch', () => {
+    const result = evaluate(
+      auditJson({
+        mid: { severity: 'high', nodes: ['node_modules/mid'], via: ['cyclic-peer'] },
+        'cyclic-peer': { severity: 'high', nodes: ['node_modules/cyclic-peer'], via: ['mid'] },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/never resolved to any checkable advisory/);
+  });
+
+  it('fails closed on a high/critical package with a genuinely empty top-level via array', () => {
+    const result = evaluate(auditJson({ 'no-via': { severity: 'high', nodes: ['node_modules/no-via'], via: [] } }));
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/no "via" entries listed/);
+  });
+
+  it('does not emit a redundant "never resolved" reason alongside a more specific unresolvable-chain reason', () => {
+    const result = evaluate(
+      auditJson({ outer: { severity: 'high', nodes: ['node_modules/outer'], via: ['totally-unknown-package'] } }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons).toHaveLength(1);
+    expect(result.kind === 'fail' && result.reasons[0]).toMatch(/bare dependency-name reference/);
+  });
+
+  it('fails closed when a chain-resolved advisory has an empty nodes array (not just the top-level package)', () => {
+    const result = evaluate(
+      auditJson({
+        outer: { severity: 'high', nodes: ['node_modules/outer'], via: ['undici'] },
+        undici: {
+          severity: 'high',
+          nodes: [],
+          via: [{ severity: 'high', url: `https://github.com/advisories/${ALLOWLISTED_UNDICI.advisoryId}` }],
+        },
+      }),
+    );
+    expect(result.kind).toBe('fail');
+    expect(result.kind === 'fail' && result.reasons.join()).toMatch(/no install paths listed/);
+  });
+});
+
+describe('audit-check: resolveVia() (direct unit tests)', () => {
+  it('resolves a bare name to its real advisory objects', () => {
+    const result = resolveVia(
+      'leaf',
+      { leaf: { severity: 'high', nodes: ['node_modules/leaf'], via: [{ severity: 'high', url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc' }] } },
+      new Set(),
+    );
+    expect(result).toEqual({
+      kind: 'resolved',
+      advisories: [{ advisoryId: 'GHSA-aaaa-bbbb-cccc', packageName: 'leaf', nodes: ['node_modules/leaf'] }],
+    });
+  });
+
+  it('folds a cycle to a resolved-but-empty result rather than a failure', () => {
+    const vulnerabilities: Record<string, AuditFinding> = {
+      a: { severity: 'high', nodes: ['node_modules/a'], via: ['b'] },
+      b: { severity: 'high', nodes: ['node_modules/b'], via: ['a'] },
+    };
+    const result = resolveVia('b', vulnerabilities, new Set(['a']));
+    expect(result).toEqual({ kind: 'resolved', advisories: [] });
+  });
+
+  it('returns unresolvable for a name absent from the vulnerabilities map', () => {
+    expect(resolveVia('does-not-exist', {}, new Set())).toEqual({ kind: 'unresolvable', packageName: 'does-not-exist' });
+  });
+
+  it('returns unresolvable for a package with an empty via array', () => {
+    const vulnerabilities: Record<string, AuditFinding> = { empty: { severity: 'high', nodes: ['node_modules/empty'], via: [] } };
+    expect(resolveVia('empty', vulnerabilities, new Set())).toEqual({ kind: 'unresolvable', packageName: 'empty' });
+  });
+
+  it('returns unresolvable for a malformed via entry shape', () => {
+    const vulnerabilities = {
+      malformed: { severity: 'high', nodes: ['node_modules/malformed'], via: [{ nope: true }] },
+    } as unknown as Record<string, AuditFinding>;
+    expect(resolveVia('malformed', vulnerabilities, new Set())).toEqual({
+      kind: 'unresolvable',
+      packageName: 'malformed',
+    });
+  });
+});
+
+describe('audit-check: evaluate() -- real issue #54 fixture (braces/tinypool chain)', () => {
+  it('passes end-to-end against the real captured braces/http-cache-semantics/tinypool chain shape', () => {
+    expect(evaluate(REAL_AUDIT_JSON_WITH_BRACES_CHAIN)).toEqual({ kind: 'pass' });
+  });
+
+  it('pins today\'s known-good install paths for every dev-tooling-no-fix entry (regression guard)', () => {
+    for (const [packageName, expectedNodes] of Object.entries(KNOWN_GOOD_DEV_TOOLING_NO_FIX_PATHS)) {
+      const finding = REAL_AUDIT_JSON_WITH_BRACES_CHAIN.vulnerabilities[packageName];
+      expect(finding, `expected a "${packageName}" entry in the fixture`).toBeDefined();
+      expect(finding!.nodes).toEqual(expectedNodes);
+    }
+  });
+});
+
+describe('audit-check: ALLOWLIST dated-justification invariant (AC-4)', () => {
+  it('every allowlist entry has a non-empty addedOn, reviewBy, and reason', () => {
+    for (const entry of ALLOWLIST) {
+      expect(entry.addedOn.length, `${entry.packageName} (${entry.advisoryId}): addedOn`).toBeGreaterThan(0);
+      expect(entry.reviewBy.length, `${entry.packageName} (${entry.advisoryId}): reviewBy`).toBeGreaterThan(0);
+      expect(entry.reason.length, `${entry.packageName} (${entry.advisoryId}): reason`).toBeGreaterThan(0);
+    }
   });
 });
 
