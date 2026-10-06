@@ -151,6 +151,11 @@
     "vite": "^8.0.10",
     "vitest": "^3.2.7"
   },
+  "overrides": {
+    "@semantic-release/npm": {
+      "npm": "file:../../../scripts/npm-audit-stub"
+    }
+  },
   "packageManager": "npm@11.11.1",
   "engines": {
     "node": ">=20",
