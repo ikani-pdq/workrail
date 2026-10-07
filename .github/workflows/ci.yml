@@ -278,7 +278,13 @@ jobs:
         run: |
           echo "## SBOM" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          npm sbom --sbom-format=cyclonedx > sbom.json
+          # --omit=dev: describe what ships, not the dev/build toolchain. Also
+          # sidesteps npm sbom's ESBOMPROBLEMS check, which flags the
+          # @semantic-release/npm -> npm override (see scripts/npm-audit-stub/)
+          # as "invalid" purely because it's file:-resolved rather than from
+          # the registry -- true regardless of the stub's version number, and
+          # irrelevant here since that whole subtree is dev-only anyway.
+          npm sbom --sbom-format=cyclonedx --omit=dev > sbom.json
           COMPONENT_COUNT=$(node -p "require('./sbom.json').components.length")
           echo "Generated CycloneDX SBOM with ${COMPONENT_COUNT} components (see workflow artifacts)." >> $GITHUB_STEP_SUMMARY
 

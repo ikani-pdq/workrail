@@ -1,0 +1,6 @@
+{
+  "name": "npm",
+  "version": "0.0.0-stub",
+  "private": true,
+  "description": "Stub replacing the real `npm` package for @semantic-release/npm's dependency on it (see the root package.json `overrides` entry and issue #50). This fork's .releaserc.cjs never configures the @semantic-release/npm plugin -- nothing here publishes to a registry -- so @semantic-release/npm is pulled in only because the `semantic-release` package lists it as a dependency, never because we use it. @semantic-release/npm's own code never imports the `npm` package's JS; its plugin functions (prepare/publish/addChannel) shell out to an `npm` binary via execa only when actually invoked, which never happens here. The real `npm` package vendors outdated, unpatched copies of brace-expansion/undici/http-cache-semantics/ip-address as bundleDependencies with no upstream fix available -- this stub removes them from the installed tree entirely instead of allowlisting them in scripts/audit-check.ts. If @semantic-release/npm's plugin functions are ever wired up in the future, execa's preferLocal falls back to whatever `npm` binary is already on PATH (the real npm CLI driving the install), since this stub ships no bin of its own."
+}
